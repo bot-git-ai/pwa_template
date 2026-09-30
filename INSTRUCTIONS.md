@@ -109,6 +109,8 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Never write a test that skips, soft-passes or is `#[ignore]`d to get a change through.
 - Keep verification notes honest, and mention any check that was not run.
 - Put both build steps in `.github/workflows/build.yml`, and have the workflow verify the built site rather than trust a green job.
+- Write that check's multi-line Python as a `<<'PY'` heredoc, never `python3 -c`: an indented `-c` body breaks on shell quoting, not on Python.
+- Lint the wasm target with the same `RUSTFLAGS`/`rustc-cfg` the crate builds with; `web-sys` changes an accessor's return type under `--cfg=web_sys_unstable_apis`, so a leg without it is a false green.
 - Check the built site by naming every file, not by counting: a file that is referenced but never written does not change the count.
 - Fail on unexpected files as well as missing ones; a file nobody meant to publish is as much a defect as one that is absent, and neither shows up in a green build.
 - Check the manifest against what was actually rasterized, not against a copy of the source.

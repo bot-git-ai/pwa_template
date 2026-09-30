@@ -176,6 +176,14 @@ jobs:
           # failure this check exists for is a `dist/` that looks publishable and
           # is missing something the page or the worker references -- a file
           # that is referenced but never written does not show up as a count.
+          #
+          # The Python below is a `<<'PY'` heredoc, not `python3 -c`, and it must
+          # stay one. An indented `python3 -c "…"` body is quoted by the shell
+          # before Python ever sees it, so a single quote in the body ends the
+          # string early and the failure is a shell parse error pointing at
+          # nothing that looks wrong. Three sibling workflows had exactly that.
+          # The quoted delimiter also stops the shell expanding `$` inside the
+          # body, which a JSON or shell check here would otherwise mangle.
           expected="app.js app_bg.wasm icon.svg icon-192.png icon-512.png index.html manifest.webmanifest service-worker.js"
           missing=""
           for file in $expected; do
@@ -248,6 +256,19 @@ jobs:
           # Both targets, as AGENTS.md requires. The crate denies warnings, but
           # only for the target being compiled, so a clean host build says
           # nothing about the wasm one.
+          #
+          # The wasm leg must be built with the same cfg the crate is built
+          # with. `web-sys` exposes an unstable form of several accessors under
+          # `--cfg=web_sys_unstable_apis`, and the two forms can differ in
+          # *type* -- `MouseEvent::client_x` is `i32` on the stable path and
+          # `f64` on the unstable one, and `PointerEvent` inherits it. Code
+          # that only type-checks under one of them fails to compile under the
+          # other, in opposite directions, so a leg missing the cfg is not a
+          # weaker check: it lints a different program from the one that ships.
+          #
+          # This crate uses no unstable APIs, so the two are equivalent here.
+          # An app that does must export the cfg for this step, the way
+          # `chwazi` does, or it will read a green that is not true.
           cargo clippy --locked --all-targets -- -D warnings
           cargo clippy --locked --lib --target wasm32-unknown-unknown -- -D warnings
 
