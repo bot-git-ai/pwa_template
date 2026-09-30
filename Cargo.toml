@@ -1,0 +1,11 @@
+[package]
+name = "pwa_template"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+description = "Minimal Rust PWA template"
+
+[lib]
+name = "pwa_template"
+crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
