@@ -35,7 +35,9 @@ js-sys = "0.3.105"
 web-sys = { version = "0.3.105", features = [
   "Window", "Document", "Element", "HtmlElement", "HtmlButtonElement",
   "Node", "Event", "EventTarget", "Navigator", "Storage", "Performance",
-  "ServiceWorkerContainer", "ServiceWorkerRegistration", "console"
+  "ServiceWorkerContainer", "ServiceWorkerRegistration",
+  "ServiceWorker", "RegistrationOptions", "console",
+  "Location", "Url"
 ] }
 
 [lints.rust]
