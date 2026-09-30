@@ -68,15 +68,24 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Serve from an allowlist of `GET` requests, and leave everything else alone.
 - Report offline readiness in the page, not only in the console; it needs one successful visit over HTTPS or localhost.
 
+## What the user sees
+
+- Never let user-visible text name the implementation: no "Rust", "WebAssembly", "wasm", "bindings" or "compile" in markup, in any string written from Rust, or in a meta description.
+- Say what the user gets or loses instead: "Simple PWA could not start. Reload the page, or check your connection."
+- Allow "JavaScript" only in a `<noscript>`, where naming the thing the user must switch on is the instruction itself.
+- Keep implementation vocabulary in comments and in `AGENTS.md`, where it is useful.
+- Label a control for what it does, never for what it used to do, and let the visible text be the accessible name rather than overriding it.
+- Give every status line something to say, and make sure it says it: a line frozen on its initial text is decoration pretending to be information.
+- Describe the app, not its build, in `<meta name="description">`; it is what a search engine and a share sheet show.
+
 ## Accessibility
 
 - Use `button` for actions, `a` for navigation, and a label for every input.
 - Preserve visible focus states; never remove the outline without replacing it with something equally visible.
 - Use `aria-live` or `role="status"` for dynamic text users need to notice.
-- Use `disabled` to say an action is unavailable; it is what a keyboard and a screen reader both see.
+- Use `disabled` to say an action is unavailable; it is what a keyboard and a screen reader both see, and it needs no `aria-label`.
 - Keep touch targets large enough for mobile use, and avoid interactions that require hover.
 - Do not use viewport-scaled font sizes for normal UI text, and keep text inside its containers on small screens.
-- Add a `<noscript>` line when the app needs WebAssembly to load.
 
 ## Look and scope
 

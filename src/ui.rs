@@ -31,13 +31,17 @@ use crate::counter::Counter;
 /// never renders from inside a borrow.
 type State = Rc<RefCell<Counter>>;
 
-/// The `#status` line the loader replaced once Rust was running.
-const LOADING: &str = "Loading…";
-/// Shown when the offline cache could not be set up.
+/// Shown while the offline cache is still being set up. It is the only status
+/// line on the page, and it always changes: the app replaces it with one of the
+/// two messages below. A line that can only ever show its initial text is
+/// decoration pretending to be information.
+const OFFLINE_PENDING: &str = "Getting this app ready for offline use…";
+/// Shown when the offline cache could not be set up. Says what the user loses,
+/// not what the app is built with.
 const OFFLINE_UNAVAILABLE: &str =
-    "Offline setup unavailable. The app still works, but installing it needs HTTPS or localhost.";
+    "Offline use is unavailable. The app works, but you will need a connection.";
 /// Shown once the offline cache is in place.
-const OFFLINE_READY: &str = "Ready for offline use. Install from your browser's app menu.";
+const OFFLINE_READY: &str = "Ready for offline use. Add it to your home screen to keep it handy.";
 
 /// Start the app.
 ///
@@ -106,25 +110,24 @@ fn render(document: &Document, state: &State) {
     let counter = *state.borrow();
     let readout = counter.readout();
 
-    // The live region announces the count, so a screen reader hears the
-    // change; the number itself is `aria-hidden` because it would otherwise be
-    // announced twice.
-    set_text(document, "status", LOADING);
+    // The count and its wording on one line. It is the only element the user
+    // came for, and `role="status"` on the shell announces every change.
+    set_text(
+        document,
+        "message",
+        &format!("{} · {}", readout.count, readout.label),
+    );
 
     // `disabled` is the honest way to say "this cannot go higher", and unlike a
     // greyed-out class it is what a screen reader and a keyboard both see.
+    //
+    // No `aria-label`: the button's visible text is already its accessible
+    // name, and a second one describing the same control differently — a
+    // sighted user reading "Add one", a screen reader user told "Add one tap.
+    // Currently nothing yet" — is the defect, not the fix. `disabled` alone
+    // conveys the ceiling.
     if let Some(button) = button(document, "hello-button") {
-        let disabled = counter.is_full();
-        button.set_disabled(disabled);
-        set_attribute(
-            &button,
-            "aria-label",
-            &if disabled {
-                format!("Full at {}. There is no more room to count.", readout.count)
-            } else {
-                format!("Add one tap. Currently {}", readout.label)
-            },
-        );
+        button.set_disabled(counter.is_full());
     }
 }
 
@@ -183,6 +186,12 @@ async fn announce_offline(window: Window) {
     };
     let container = window.navigator().service_worker();
 
+    // Written from Rust rather than left to the shell's markup, so the pending
+    // text has exactly one owner. The shell ships the same sentence for the
+    // first paint; this overwrites it with the same constant, which is a no-op
+    // in content and a guarantee that the two cannot drift.
+    set_text(&document, "offline-status", OFFLINE_PENDING);
+
     if let Err(error) = JsFuture::from(container.register("./service-worker.js")).await {
         warn("service worker registration failed", error);
         set_text(&document, "offline-status", OFFLINE_UNAVAILABLE);
@@ -223,11 +232,6 @@ fn set_text(document: &Document, id: &str, text: &str) {
     if let Some(element) = element(document, id) {
         element.set_text_content(Some(text));
     }
-}
-
-/// Set an attribute, ignoring a failure to do so.
-fn set_attribute(element: &Element, name: &str, value: &str) {
-    element.set_attribute(name, value).ok();
 }
 
 /// Report something recoverable. Never a panic, never silent.

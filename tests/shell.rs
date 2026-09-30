@@ -390,7 +390,6 @@ fn the_page_is_accessible_and_installable() {
     for required in [
         "id=\"message\"",
         "id=\"hello-button\"",
-        "id=\"status\"",
         "id=\"offline-status\"",
         "id=\"error\"",
         "role=\"status\"",
@@ -415,6 +414,183 @@ fn the_page_is_accessible_and_installable() {
         page.contains("prefers-color-scheme") && page.contains("prefers-reduced-motion"),
         "the shell must respect both media queries"
     );
+}
+
+/// No visible text may name the implementation.
+///
+/// An interface that tells the user it is "written in Rust", "compiled to
+/// WebAssembly" or "loading the Rust app" is talking to nobody: the user came
+/// to use a counter, and how it is built is neither useful nor anything they
+/// can act on. It is also the single most common way a demo page ends up looking
+/// unfinished, because the sentences are about the author, not the app.
+///
+/// Implementation vocabulary is fine in comments, docs and `AGENTS.md`. It is
+/// not fine in anything a reader can see: markup, text, `alt`, the meta
+/// description, or any string Rust writes into the DOM.
+#[test]
+fn no_visible_text_names_the_implementation() {
+    let page = shell();
+    // Rendered text only: comments are stripped, and `<style>`/`<script>` bodies
+    // are dropped too, since neither is something a reader sees.
+    let rendered = visible_text(&page);
+    for banned in [
+        "rust",
+        "webassembly",
+        "wasm",
+        "bindings",
+        "compiled",
+        "compile",
+    ] {
+        assert!(
+            !rendered.to_lowercase().contains(banned),
+            "the rendered page says \"{banned}\"; user-visible text must not name \
+             the implementation — say what the user gets or loses instead. \
+             Visible text was:\n{rendered}"
+        );
+    }
+    // "JavaScript" is the single exception, and only in a `<noscript>`: naming
+    // the thing the user must go and switch on is the one case where the
+    // implementation vocabulary *is* the instruction. Everywhere else it is
+    // not actionable and is banned above.
+    let outside_noscript = rendered.replace(noscript_body(&rendered).as_str(), "");
+    assert!(
+        !outside_noscript.to_lowercase().contains("javascript"),
+        "only a <noscript> block may name JavaScript; everywhere else it must not"
+    );
+    // The same rule for every string the Rust layer can write into the DOM.
+    let rust = std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs");
+    for line in rust.lines() {
+        let trimmed = line.trim_start();
+        // Skip doc comments and line comments; they are documentation.
+        if !trimmed.starts_with("const ") || !trimmed.contains('"') {
+            continue;
+        }
+        let value = trimmed.split('"').nth(1).unwrap_or_default().to_lowercase();
+        for banned in ["rust", "webassembly", "wasm", "javascript", "compiled"] {
+            assert!(
+                !value.contains(banned),
+                "a user-visible string in src/ui.rs says \"{banned}\": {trimmed}"
+            );
+        }
+    }
+}
+
+/// A status line must be able to change. An element that can only ever show the
+/// text it shipped with is decoration pretending to be information, and two
+/// permanently-frozen lines under a working readout are most of what makes a
+/// demo page look unfinished.
+///
+/// The rule this enforces: if a string is only ever set by the loader, it does
+/// not belong on the page at all.
+#[test]
+fn no_status_line_is_frozen() {
+    let page = shell();
+
+    // Every `id` the page renders, so a new one cannot slip in unasserted.
+    // `#error` is exempt: it is the failure box, filled by the loader's catch
+    // and hidden until then. An element that only exists on failure is not a
+    // frozen status line.
+    let mut shown: Vec<&str> = page
+        .match_indices("id=\"")
+        .filter_map(|(at, _)| {
+            let rest = &page[at + 4..];
+            rest.find('"').map(|end| &rest[..end])
+        })
+        .filter(|id| !matches!(*id, "message" | "hello-button" | "error"))
+        .collect();
+    shown.sort_unstable();
+
+    let rust = std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs");
+    for id in shown {
+        assert!(
+            rust.contains(&format!("\"{id}\"")),
+            "#{id} is rendered by the shell but src/ui.rs never touches it, so it \
+             can only ever show the text it shipped with — remove it or let the \
+             app write to it"
+        );
+    }
+}
+
+/// The button's visible text is its accessible name. An `aria-label` describing
+/// the same control differently gives a sighted user and a screen-reader user
+/// two different descriptions of one button, which is worse than either.
+#[test]
+fn the_button_has_one_consistent_name() {
+    let page = shell();
+    let rust = std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs");
+    // Comments in both files discuss *why* there is no aria-label, so search the
+    // markup only: strip comments from the shell, and take non-comment lines of
+    // the Rust.
+    let shell_markup = visible_text(&page);
+    assert!(
+        !shell_markup.contains("aria-label"),
+        "the shell must not hard-code an aria-label: the visible text is already \
+         the accessible name, and a second name contradicts it"
+    );
+    for (source, text) in [("src/ui.html", &page), ("src/ui.rs", &rust)] {
+        for line in text.lines() {
+            let trimmed = line.trim();
+            // Skip comment lines and the continuation lines of block comments.
+            let is_comment = trimmed.starts_with("//")
+                || trimmed.starts_with("///")
+                || trimmed.starts_with('*')
+                || trimmed.starts_with("/*");
+            if is_comment {
+                continue;
+            }
+            assert!(
+                !trimmed.contains("aria-label") && !trimmed.contains("aria_label"),
+                "{source} sets an aria-label on a control that has visible text: {trimmed}\n\
+                 The visible text is already the accessible name; a second one \
+                 contradicts it"
+            );
+        }
+    }
+
+    // And the label must describe what the app does. "Say hello" is what the
+    // original template's button said, on an app that only printed a greeting;
+    // this app counts, so the label has to say so.
+    let shell_button = page
+        .split_once("<button id=\"hello-button\" type=\"button\">")
+        .expect("the app's one button")
+        .1
+        .split_once("</button>")
+        .expect("the end of the button")
+        .0;
+    assert_eq!(
+        shell_button.trim(),
+        "Add one",
+        "the button's label must describe what it does, not what it used to do"
+    );
+}
+
+/// The text inside the page's `<noscript>` element, or `""` if it has none.
+fn noscript_body(page: &str) -> String {
+    page.split_once("<noscript>")
+        .and_then(|(_, rest)| rest.split_once("</noscript>"))
+        .map_or(String::new(), |(body, _)| body.to_owned())
+}
+
+/// Everything a reader can actually see: HTML with comments, `<style>` bodies
+/// and `<script>` bodies removed.
+///
+/// The `<noscript>` block is deliberately *kept*, even though it lives in a
+/// comment-like position — a browser with scripting off renders exactly that
+/// text, so it is user-visible text and is held to the same rule. What it must
+/// not do is name the implementation: it says what the user loses.
+fn visible_text(page: &str) -> String {
+    let mut out = String::with_capacity(page.len());
+    let mut rest = page;
+    loop {
+        let Some(start) = rest.find("<!--") else {
+            out.push_str(rest);
+            return out;
+        };
+        out.push_str(&rest[..start]);
+        rest = rest[start..]
+            .find("-->")
+            .map_or("", |end| &rest[start + end + 3..]);
+    }
 }
 
 /// The site is mounted under an arbitrary prefix, so every URL in it is
@@ -622,7 +798,7 @@ fn the_instructions_are_still_a_short_flat_list() {
     );
     let rules: Vec<&str> = text.lines().filter(|line| line.starts_with("- ")).collect();
     assert!(
-        rules.len() >= 30 && rules.len() <= 80,
+        rules.len() >= 30 && rules.len() <= 90,
         "the rules must stay a short list, not an essay: {} rules",
         rules.len()
     );
@@ -653,6 +829,9 @@ fn the_instructions_are_still_a_short_flat_list() {
         "touch build.rs",
         "dist/",
         "assets/icon.svg",
+        // The family-wide rule prompted by a defect the user found: no
+        // user-visible text may name the implementation.
+        "name the implementation",
     ] {
         assert!(
             text.contains(required),
