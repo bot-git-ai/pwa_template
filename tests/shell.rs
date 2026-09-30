@@ -707,7 +707,12 @@ fn the_worker_never_answers_outside_its_own_directory() {
 /// scope it does not own.
 #[test]
 fn the_page_states_the_scope_and_releases_a_wider_one() {
-    let ui = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    // Comments go first. The prose in `src/ui.rs` names these calls while
+    // explaining them, so an assertion over raw text can be satisfied by the
+    // explanation while the call it is about is gone: green, and proving
+    // nothing. A test about what the code does has to read the code.
+    let ui = strip_rust_comments(&source);
     assert!(
         ui.contains("register_with_options"),
         "the worker must be registered with an explicit scope; left to default, \
@@ -732,7 +737,12 @@ fn the_page_states_the_scope_and_releases_a_wider_one() {
 /// a real bug in the first version of this code.
 #[test]
 fn the_script_comparison_strips_a_suffix_rather_than_a_character_set() {
-    let ui = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    // Comments go first. The prose in `src/ui.rs` names these calls while
+    // explaining them, so an assertion over raw text can be satisfied by the
+    // explanation while the call it is about is gone: green, and proving
+    // nothing. A test about what the code does has to read the code.
+    let ui = strip_rust_comments(&source);
     // The prose in this file names the method to explain why it is not used, so
     // the assertion is about code: a call, not the word.
     let calls: Vec<&str> = ui
@@ -761,7 +771,12 @@ fn the_script_comparison_strips_a_suffix_rather_than_a_character_set() {
 /// directory, or the page registers a scope the worker's guard does not match.
 #[test]
 fn the_scope_is_a_relative_directory_shared_with_the_worker() {
-    let ui = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
+    // Comments go first. The prose in `src/ui.rs` names these calls while
+    // explaining them, so an assertion over raw text can be satisfied by the
+    // explanation while the call it is about is gone: green, and proving
+    // nothing. A test about what the code does has to read the code.
+    let ui = strip_rust_comments(&source);
     assert!(
         ui.contains("const SCOPE: &str = \"./\";"),
         "the scope must be the app's own directory, relative — so one build works \
@@ -1046,4 +1061,30 @@ fn the_pinned_digest_function_is_correct() {
         sha256_hex(b"The quick brown fox jumps over the lazy dog"),
         "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
     );
+}
+
+/// Drop `//` line comments and `/* ... */` blocks, so an assertion about what
+/// the code *does* cannot be satisfied by a comment saying what it does.
+fn strip_rust_comments(source: &str) -> String {
+    let mut out = String::with_capacity(source.len());
+    let mut rest = source;
+    // A line comment runs to the end of the line, and a block comment to its
+    // closer. A `//` inside a string literal is not a comment, but none of the
+    // strings these tests look for contain one, and a full Rust tokenizer is
+    // not worth the complexity to guard against it.
+    while let Some(start) = rest.find('/') {
+        let after = &rest[start + 1..];
+        if let Some(tail) = after.strip_prefix("//") {
+            out.push_str(&rest[..start]);
+            rest = tail.split_once('\n').map_or("", |(_, line)| line);
+        } else if let Some(tail) = after.strip_prefix("/*") {
+            out.push_str(&rest[..start]);
+            rest = tail.split_once("*/").map_or("", |(_, line)| line);
+        } else {
+            out.push_str(&rest[..=start]);
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
 }
