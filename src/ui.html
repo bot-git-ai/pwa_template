@@ -3,7 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#0f766e">
+<!-- Two theme colours, one per scheme, and no single one that has to guess.
+     An installed app's status bar is painted from these, so one hardcoded value
+     would put a dark bar on a light page (or the reverse) until the user changed
+     their phone. The manifest deliberately carries no `theme_color` for the same
+     reason: an installed app's chrome cannot express a scheme variant, so it
+     would override both of these. -->
+<meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0f1117" media="(prefers-color-scheme: dark)">
 <meta name="description" content="A minimal offline-capable counter.">
 <title>Simple PWA</title>
 <link rel="manifest" href="./manifest.webmanifest">
@@ -13,112 +20,172 @@
 <link rel="icon" href="./icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <style>
+/* One palette, borrowed from the server this app is served beside, so a PWA
+   opened from the same origin does not look like a different product. The names
+   are that project's tokens unchanged: a page that is restyled later reuses them
+   instead of inventing a second set of near-identical greys.
+
+   Dark is the default and light is the override, which is the reverse of the
+   `color-scheme: light dark` convention. It is deliberate: `color-scheme` names
+   the scheme the page is *drawn* in, and a reader who has not chosen anything
+   gets the one this app was designed in. A reader who has chosen gets theirs. */
 :root {
-  color-scheme: light dark;
-  --accent: #0f766e;
-  --background: #f8fafc;
-  --text: #17212b;
-  --card: #ffffff;
-  --line: #d8e1e8;
-  --focus: #2563eb;
-  --muted: #5b6b7b;
+  color-scheme: dark;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --bg: #0f1117;
+  --surface: #171a23;
+  --fg: #e4e7ec;
+  --muted: #8d94a3;
+  --accent: #5fd38a;
+  --accent-fg: #0c1a12;
+  --link: #79b8ff;
+  --border: #2b303c;
+  --danger: #ef6a6a;
+  /* The one token that does NOT follow the scheme, and the only one.
+
+     The icon is a fixed dark-grey glyph, pinned by a test to the author's
+     original file, so it cannot be recoloured per scheme — and at 1.8:1 it is
+     effectively invisible on either of this page's dark surfaces. Rather than
+     touch a committed asset, the mark sits on a small light chip, which is the
+     lightest thing on the page in dark mode and a quiet grey tile in light
+     mode. Same chip either way: one value, one reason, and the icon reads at
+     about 8:1 in both. */
+  --mark-bg: #e9ebee;
 }
 
 * { box-sizing: border-box; }
 
+html { height: 100%; }
+
 body {
-  min-height: 100vh;
-  margin: 0;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: var(--background);
-  color: var(--text);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  margin: 0 auto;
+  min-height: 100%;
+  max-width: 46rem;
+  padding: 1.5rem .75rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font);
+  font-size: 13.5px;
+  line-height: 1.4;
 }
 
 main {
-  width: min(100%, 360px);
-  padding: 32px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--card);
+  width: min(100%, 22rem);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: .6rem;
+  padding: .9rem 1rem 1rem;
   text-align: center;
 }
 
+/* The title and the mark share one line, the way a page header does there, and
+   the mark is the size of a status dot rather than the size of a logo: the
+   number is the app, the icon is only how you recognise it on a home screen.
+   It carries `--mark-bg` behind it, because the committed glyph is dark and
+   would otherwise disappear into the panel. */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  margin-bottom: .9rem;
+}
+
 .mark {
-  width: 72px;
-  height: 72px;
-  margin: 0 auto;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 2px;
+  border-radius: .3rem;
+  background: var(--mark-bg);
 }
 
 h1 {
-  margin: 16px 0 8px;
-  font-size: 1.25rem;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--fg);
 }
 
 #message {
-  margin: 0 0 24px;
-  font-size: 2rem;
-  font-weight: 700;
+  margin: 0 0 .9rem;
+  font-family: var(--mono);
+  font-size: 1.75rem;
+  font-weight: 600;
   line-height: 1.2;
   word-break: break-word;
 }
 
 button {
-  border: 0;
-  border-radius: 8px;
-  padding: 12px 18px;
-  min-height: 44px;
-  background: var(--accent);
-  color: #ffffff;
-  cursor: pointer;
   font: inherit;
-  font-weight: 700;
+  font-size: .82rem;
+  font-weight: 600;
+  min-height: 44px;
+  padding: .28rem 1.1rem;
+  color: var(--accent-fg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: .5rem;
+  cursor: pointer;
   /* Kill the 300ms tap delay and the double-tap zoom without a framework. */
   touch-action: manipulation;
+  transition: filter .15s;
 }
+
+button:hover { filter: brightness(1.08); }
+
+button:active { filter: brightness(.9); }
 
 button:disabled {
   opacity: .5;
   cursor: default;
-}
-
-button:focus-visible {
-  outline: 3px solid var(--focus);
-  outline-offset: 3px;
+  filter: none;
 }
 
 /* Never remove the focus ring without replacing it with something at least as
    visible. */
 :focus-visible {
-  outline: 3px solid var(--focus);
+  outline: 3px solid var(--link);
   outline-offset: 3px;
 }
 
 .notes {
-  margin: 24px 0 0;
-  padding: 16px 0 0;
-  border-top: 1px solid var(--line);
+  margin: .9rem 0 0;
+  padding: .55rem 0 0;
+  border-top: 1px solid var(--border);
   color: var(--muted);
-  font-size: .8125rem;
+  font-size: .78rem;
   line-height: 1.5;
 }
 
-.notes p { margin: 0 0 4px; }
+.notes p { margin: 0 0 .2rem; }
 
-@media (prefers-color-scheme: dark) {
+.notes p:last-child { margin-bottom: 0; }
+
+/* The failure box is the one line on the page that is not muted: it is the only
+   one the reader has to act on, and it is hidden until there is something to
+   say. */
+#error { color: var(--danger); }
+
+@media (prefers-color-scheme: light) {
   :root {
-    --background: #111827;
-    --card: #1f2937;
-    --text: #f8fafc;
-    --line: #344150;
-    --muted: #9aa8b8;
-    --focus: #93c5fd;
+    color-scheme: light;
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --fg: #20242b;
+    --muted: #5b6270;
+    --accent: #0b8a4e;
+    --accent-fg: #ffffff;
+    --link: #0a5bd3;
+    --border: #d8dce2;
+    --danger: #c23434;
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
+}@media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation: none !important;
     transition: none !important;
@@ -129,8 +196,10 @@ button:focus-visible {
 </head>
 <body>
 <main>
-  <img class="mark" src="./icon.svg" alt="" width="72" height="72">
-  <h1>Simple PWA</h1>
+  <div class="head">
+    <img class="mark" src="./icon.svg" alt="" width="20" height="20">
+    <h1>Simple PWA</h1>
+  </div>
   <!-- The only element that changes when the app works. Rust owns its text from
        the first frame, so there is no "loading" state to flash: the number is
        real before the user can see it. `aria-live` makes every change announce

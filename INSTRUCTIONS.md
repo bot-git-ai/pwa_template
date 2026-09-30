@@ -91,6 +91,9 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 
 - Keep the author's colours, layout and wording. This is a rewrite, not a redesign.
 - Use `prefers-color-scheme` when it is easy, set `color-scheme` alongside it, and respect `prefers-reduced-motion`.
+- Start from the palette in `src/ui.html` rather than inventing colours: it is the same dark-first token set the server this app is served beside uses, so a PWA opened from that origin does not look like a different product.
+- Give every foreground/background pair at least 4.5:1 contrast, and re-check any colour you change instead of assuming the token set already passed.
+- Keep the committed icon's colour. `assets/icon.svg` is pinned by a test, and a dark glyph on a dark panel is unreadable — put it on a light chip rather than editing the asset.
 - Keep colors simple, but avoid making the whole app one undifferentiated hue.
 - Keep layout responsive with simple `grid`, `flex`, `width: min(...)` and media queries.
 - Keep CSS selectors purposeful: classes for styling, IDs for unique Rust hooks.

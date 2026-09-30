@@ -55,11 +55,24 @@ use std::path::{Path, PathBuf};
 /// These are the original template's own values and they are the template's
 /// identity: change them here, not in a JSON file. The icon list is appended
 /// from what was actually rasterized, so it cannot drift from the PNGs.
+///
+/// The colours are the app's own, taken from the palette in `src/ui.html`.
+///
+/// `background_color` is dark on purpose. It only ever colours the splash
+/// screen, which is shown for a moment and cannot be scheme-aware, so it is the
+/// one surface where a fixed value costs nothing and a light one flashes.
+///
+/// `theme_color` is deliberately **absent**, and that is not an oversight.
+/// Chrome for Android prefers a manifest `theme_color` over the per-scheme
+/// `<meta name="theme-color" media=...>` tags the shell declares, and a
+/// manifest cannot express a scheme variant — so putting one here would pin the
+/// installed app's status bar dark even on a device in light mode, and
+/// silently override both meta tags. Omitting it lets the media-scoped tags win,
+/// which is the only way the status bar can follow the system.
 const MANIFEST: Manifest = Manifest {
     name: "Simple PWA",
     short_name: "PWA",
-    theme_color: "#0f766e",
-    background_color: "#f8fafc",
+    background_color: "#0f1117",
 };
 
 /// The app-shell files this script copies verbatim, and where each comes from.
@@ -83,7 +96,6 @@ const ICON_OUT: &str = "icon.svg";
 struct Manifest {
     name: &'static str,
     short_name: &'static str,
-    theme_color: &'static str,
     background_color: &'static str,
 }
 
@@ -211,7 +223,6 @@ fn manifest(icons: &[serde_json::Value]) -> String {
         "scope": "./",
         "display": "standalone",
         "background_color": MANIFEST.background_color,
-        "theme_color": MANIFEST.theme_color,
         "icons": icons,
     })
     .to_string()
