@@ -1,63 +1,113 @@
 # Coding Instructions
 
-- Build a small static progressive web app in plain HTML, CSS, JavaScript, JSON, and SVG.
-- Keep the app build-free: no bundler, transpiler, framework, generated CSS, runtime package install, or compile step.
-- Keep the app files simple and explicit: `index.html`, `style.css`, `app.js`, `sw.js`, `icon.svg`, and `manifest.json`.
-- Prefer the simplest complete app behavior.
-- Keep features narrow, direct, and easy to explain.
-- Use `index.html` for semantic document structure, app metadata, and asset links.
-- Use `style.css` for all styling.
-- Use `app.js` for browser logic, state management, rendering, event handling, and service worker registration.
-- Use `sw.js` only for service worker install, activate, and fetch behavior.
-- Use `manifest.json` only for PWA install metadata.
-- Use `icon.svg` as both favicon and install icon unless the app clearly needs additional icon files.
-- Keep `README.md` short: a one-line description and deployed app link are enough.
-- Update the deployed app link in `README.md` when the app name or deployment URL changes.
-- Prefer browser platform APIs over dependencies.
-- Do not add runtime dependencies for simple UI state, routing, storage, date handling, or DOM work.
-- If an app appears to need a runtime dependency, make that need explicit before adding it.
-- Keep JavaScript readable: named constants, named functions, clear state, and explicit event handlers.
-- Do not hide important behavior in clever one-liners.
-- Avoid adding modes, settings, screens, persistence, or gestures unless they clearly improve the core workflow.
-- Keep DOM lookups easy to find. Put them near the top when that keeps the file clearer, but colocate them with related behavior when that is simpler.
-- Keep startup obvious. There should be one clear path that binds events, renders initial state, and registers the service worker.
-- Keep application state explicit. Use plain objects, arrays, maps, or module-level variables when they are enough.
-- Keep pure calculations separate from DOM rendering once the app has meaningful behavior.
-- Render from state instead of letting DOM text, classes, or attributes become the source of truth.
-- Validate user input before writing it into application state.
-- Store data in `localStorage` only when persistence is useful to the user.
-- Namespace stored values with an app-specific key prefix.
-- Keep error handling practical. Handle recoverable browser API failures; let programming errors surface during development.
-- Use `button` elements for actions.
-- Use `a` elements for navigation.
-- Use labels for form inputs.
-- Preserve visible keyboard focus states.
-- Use `aria-live` or `role="status"` for dynamic text that users need to notice.
-- Keep touch targets large enough for mobile use.
-- Avoid interactions that require hover.
-- Keep CSS selectors purposeful. Prefer classes for styling and IDs for unique JavaScript hooks.
-- Keep layout responsive with simple `grid`, `flex`, `width: min(...)`, and media queries.
-- Do not use viewport-scaled font sizes for normal UI text.
-- Keep text inside its containers on small screens.
-- Keep colors simple, but avoid making the entire app one undifferentiated hue.
-- Respect `prefers-color-scheme` when it is easy to do so.
-- Avoid decorative complexity unless it helps the app's actual purpose.
-- Keep the icon simple. A one-color transparent SVG is a good default.
-- Do not add hidden build assumptions. Opening the files should reveal all runtime code.
-- Serve locally with `make serve` and open `http://localhost:8000/`.
-- Do not rely on `file://` for PWA testing. Service workers require `localhost` or HTTPS.
-- Keep `sw.js` small and predictable: skip caching on localhost, cache the app shell when deployed, handle `GET` requests with a cache-first fallback, and update its file list and cache name together.
-- Do not swallow service worker registration failures silently. Logging a warning is enough.
-- Keep `manifest.json` valid JSON.
-- Keep `manifest.json` aligned with `index.html`: app name, theme color, start URL, scope, and icon should agree.
-- Use `"display": "standalone"` unless the app specifically needs another display mode.
-- Use `"start_url": "."` and `"scope": "."` for simple root-hosted apps.
-- After one successful HTTPS load, the deployed app should be able to reload offline.
-- Test a deployed build by loading once, going offline, and reloading.
-- Run `make` before finishing changes.
-- Treat `make format` as the canonical formatter.
-- Use `npx prettier --write` and `npx eslint` for formatting and linting only. `npx` is development tooling, not a build step or runtime dependency.
-- Use `python3 -m json.tool --indent 2 manifest.json | sponge manifest.json` for JSON formatting.
-- Treat `make check` as the minimum verification command.
-- `make check` should verify required files, validate JSON, check formatting with Prettier, lint JavaScript with ESLint, check JavaScript syntax with `node`, and confirm `sw.js` lists app shell files.
-- Keep verification notes honest and mention any checks that were not run.
+This is the Rust PWA template. Copy it, rename the crate, and you have the next
+app. The rules below are the whole contract: no `Makefile`, no ESLint, no
+Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
+
+## Build
+
+- Build a small static progressive web app in Rust, plain HTML, and as little JavaScript as the platform allows.
+- Write all application logic, state and rendering in Rust.
+- Treat `cargo build` as the whole build: it writes a publishable site into `dist/`.
+- Keep the app a library, not a program: `crate-type = ["cdylib", "rlib"]`, no `[[bin]]`.
+- Add no server, no `serve` subcommand and no health check; any file host can publish `dist/`.
+
+## The two builds
+
+- Build twice, in this order, because there are two targets: `cargo build --locked --lib --target wasm32-unknown-unknown --release`, then `wasm-bindgen --target web --no-typescript --out-dir dist --out-name app …`, then `touch build.rs && cargo build --release --locked`.
+- Keep that order, and use `--out-name app` everywhere: the worker's cache version is hashed from every other file in `dist/`, the wasm included, and the artefact names must match across the family of apps.
+- Keep the `touch`: `build.rs` writes into the source tree, so cargo cannot see its output changed and would skip the second build.
+- Guard `build.rs` on `TARGET` and return early when it starts with `wasm`, or it fails on the step producing the files it writes.
+- Write in place, each file under a scratch name and renamed over its target; never replace `dist/`, or you delete the wasm and ship a site with no app in it.
+- Watch source paths in `cargo:rerun-if-changed`, not output names; cargo compares them against real files, so watching an output name means the script never re-runs.
+
+## The shell
+
+- Keep `src/ui.html` a static shell: structure, one inline `<style>` block, meta tags, and empty containers with ids.
+- Give the page exactly one `<script type="module">`, whose whole body is `import('./app.js').then(m => m.default()).catch(...)`.
+- Put no application logic in that loader — no event listener, no state, no `fetch` — and keep the catch, so a failure says plainly that the app could not start.
+- Declare no manual wasm ABI: no `instantiateStreaming`, no `wasm.exports`, no hand-written pointer protocol.
+- Register the service worker from Rust, not from the shell.
+
+## The code
+
+- Keep the app's logic in a `web-sys`-free module such as `src/<domain>.rs`, free of `web-sys`, `js-sys` and `wasm-bindgen`, so plain `cargo test` compiles and runs it.
+- Keep every `document`, `localStorage` and service-worker call in `src/ui.rs`, and nothing else there.
+- Compile `src/ui.rs` with `#[cfg(target_arch = "wasm32")]`, and start the app with `#[wasm_bindgen(start)]` so the loader needs no argument list and no glue.
+- Hold the state in one type: a handler mutates it, drops the borrow, then calls `render`.
+- Make one function own every word the app shows about the state, and render from that state; never let DOM text, classes or attributes become the source of truth.
+- Clamp and validate on the way into the state; saturate rather than wrap.
+- Read stored values defensively: anything missing, unparseable or out of range becomes a fresh state, and a browser API that throws is a normal condition, not a reason to fail startup.
+- Capture owned `Rc` clones in an event closure, never borrowed handles, and `forget()` the closure so the listener cannot dangle.
+- Name constants and functions. Do not hide important behaviour in clever one-liners.
+- Keep `web-sys` features to the subset used; add `Navigator` before calling `window.navigator()`.
+- Pin `wasm-bindgen = "=0.2.128"` exactly and check the CLI reports the same; a mismatch fails at load time, not at compile time.
+- Add a runtime dependency only when the need is explicit. Do not add one for simple state, formatting, storage or dates.
+
+## Files and icons
+
+- Keep `src/<domain>.rs` for the logic, `src/ui.rs` for the DOM, `src/ui.html` for the shell.
+- Keep `src/service-worker.js` a committed template for install, activate and fetch only, with exactly one `__VERSION__` for `build.rs` to substitute.
+- Assemble `manifest.webmanifest` in `build.rs`, and build its icon list from the sizes actually rasterized so the two cannot drift.
+- Keep `id`, `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere.
+- Use `"display": "standalone"` unless the app specifically needs another mode.
+- Keep `assets/icon.svg` as the committed, authoritative icon — simple, one colour, transparent — and never replace it with a PNG.
+- Rasterize the 192 and 512 install PNGs from that SVG at build time; they are build output.
+- Publish `assets/icon.svg` into `dist/` unchanged, beside the PNGs derived from it: the page links it and the worker precaches it.
+- Publish every file the page links or the worker precaches; a 404 in `caches.addAll` rejects the whole install, so one un-published file takes the service worker with it.
+- Link the SVG directly as the favicon, and the PNGs only for the manifest and `apple-touch-icon`.
+- Scale the rasterizer with an `f32`, keep `tiny-skia` at `0.12` to match `resvg 0.48`, and pin the icon's digest in `tests/shell.rs` when it is the author's original.
+- Delete the JavaScript template's files — `app.js`, `sw.js`, `style.css`, `index.html`, `manifest.json`, `Makefile`, `eslint.config.mjs` — when you adopt this template.
+
+## Storage and offline
+
+- Store data in `localStorage` only when persistence is useful, under an app-specific key prefix.
+- Write nothing on first load; an app the user never touched should leave no trace.
+- Cache the shell on install, drop old caches on activate, and claim clients.
+- Never call `skipWaiting`: an update must not swap the wasm under a live tab.
+- Serve from an allowlist of `GET` requests, and leave everything else alone.
+- Report offline readiness in the page, not only in the console; it needs one successful visit over HTTPS or localhost.
+
+## Accessibility
+
+- Use `button` for actions, `a` for navigation, and a label for every input.
+- Preserve visible focus states; never remove the outline without replacing it with something equally visible.
+- Use `aria-live` or `role="status"` for dynamic text users need to notice.
+- Use `disabled` to say an action is unavailable; it is what a keyboard and a screen reader both see.
+- Keep touch targets large enough for mobile use, and avoid interactions that require hover.
+- Do not use viewport-scaled font sizes for normal UI text, and keep text inside its containers on small screens.
+- Add a `<noscript>` line when the app needs WebAssembly to load.
+
+## Look and scope
+
+- Keep the author's colours, layout and wording. This is a rewrite, not a redesign.
+- Use `prefers-color-scheme` when it is easy, set `color-scheme` alongside it, and respect `prefers-reduced-motion`.
+- Keep colors simple, but avoid making the whole app one undifferentiated hue.
+- Keep layout responsive with simple `grid`, `flex`, `width: min(...)` and media queries.
+- Keep CSS selectors purposeful: classes for styling, IDs for unique Rust hooks.
+- Prefer the simplest complete app behavior, and the browser platform APIs over dependencies.
+- Keep features narrow and direct; avoid modes, settings, screens, persistence, gestures or decoration unless they clearly improve the core workflow.
+
+## Verification
+
+- Commit a minimal `Cargo.toml` before anything else, or the workflow refuses the repository as a project directory.
+- Derive a test's expectations from the source of truth, never duplicate them: a hand-kept list of file names is a second copy of the truth, and it drifts.
+- Extract the service worker's `ASSETS` allowlist and assert every entry is a file the build publishes; that is the check that catches a referenced file nobody writes.
+- Treat `cargo test --locked` as the minimum verification command; it needs neither the wasm target nor the generator.
+- Unit-test the domain module for real — the rules, the clamps, the formatting, the edge cases — and keep the shell's invariants in `tests/shell.rs`: one script tag, no absolute URLs, one `__VERSION__`, no tracked artefact.
+- Run clippy on both targets; a clean host build says nothing about the wasm one.
+- Run both build steps before finishing, in order, so the site you verified is the site you shipped.
+- Never write a test that skips, soft-passes or is `#[ignore]`d to get a change through.
+- Keep verification notes honest, and mention any check that was not run.
+- Put both build steps in `.github/workflows/build.yml`, and have the workflow verify the built site rather than trust a green job.
+- Check the built site by naming every file, not by counting: a file that is referenced but never written does not change the count.
+- Fail on unexpected files as well as missing ones; a file nobody meant to publish is as much a defect as one that is absent, and neither shows up in a green build.
+- Check the manifest against what was actually rasterized, not against a copy of the source.
+
+## Never commit build artifacts
+
+- Keep `target/` and `dist/` in `.gitignore`, with a comment saying why.
+- Enforce it in `tests/shell.rs`: nothing generated tracked, and the install PNGs absent from the source tree.
+- Commit only sources, plus `Cargo.lock`, which is a source input for an application.
+- Never commit in the main worktree; cut a feature branch and release from it.
+- Keep `README.md` short and `AGENTS.md` honest: decisions and verification commands, not a wish list.

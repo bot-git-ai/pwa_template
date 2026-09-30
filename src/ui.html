@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0f766e">
+<meta name="description" content="A minimal progressive web app written in Rust.">
+<title>Simple PWA</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<!-- The SVG is the icon: it is the committed source of truth, and the browser
+     scales it. The PNGs beside it are rasterized from this same file at build
+     time, for the manifest and for iOS. -->
+<link rel="icon" href="./icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+:root {
+  color-scheme: light dark;
+  --accent: #0f766e;
+  --background: #f8fafc;
+  --text: #17212b;
+  --card: #ffffff;
+  --line: #d8e1e8;
+  --focus: #2563eb;
+  --muted: #5b6b7b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--background);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+main {
+  width: min(100%, 360px);
+  padding: 32px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--card);
+  text-align: center;
+}
+
+.mark {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto;
+}
+
+h1 {
+  margin: 16px 0 8px;
+  font-size: 1.25rem;
+}
+
+#message {
+  margin: 0 0 24px;
+  font-size: 2rem;
+  font-weight: 700;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+button {
+  border: 0;
+  border-radius: 8px;
+  padding: 12px 18px;
+  min-height: 44px;
+  background: var(--accent);
+  color: #ffffff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  /* Kill the 300ms tap delay and the double-tap zoom without a framework. */
+  touch-action: manipulation;
+}
+
+button:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+button:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Never remove the focus ring without replacing it with something at least as
+   visible. */
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+.notes {
+  margin: 24px 0 0;
+  padding: 16px 0 0;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: .8125rem;
+  line-height: 1.5;
+}
+
+.notes p { margin: 0 0 4px; }
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #111827;
+    --card: #1f2937;
+    --text: #f8fafc;
+    --line: #344150;
+    --muted: #9aa8b8;
+    --focus: #93c5fd;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+</style>
+</head>
+<body>
+<main>
+  <img class="mark" src="./icon.svg" alt="" width="72" height="72">
+  <h1>Simple PWA</h1>
+  <!-- The only element that changes when the app works. Rust owns its text
+       from the first frame, so there is no "loading" state to flash: the number
+       is real before the user can see it. `aria-live` makes every change
+       announce itself. -->
+  <p id="message" role="status" aria-live="polite">0 — nothing yet</p>
+  <button id="hello-button" type="button">Say hello</button>
+
+  <div class="notes">
+    <p id="status">Loading the Rust app…</p>
+    <p id="offline-status">Offline setup pending.</p>
+    <p id="error" role="alert" hidden></p>
+  </div>
+</main>
+<noscript>This app is written in Rust and compiled to WebAssembly, which needs JavaScript to load. Nothing runs without it.</noscript>
+<!-- The one script in the document: it hands over to the generated bindings and
+     does nothing else. No state, no rendering, no event handling — everything
+     below the import is the failure message for the case where the app never
+     loads, which is a real case worth saying something about. -->
+<script type="module">
+import('./app.js').then(m => m.default()).catch(error => {
+  document.getElementById('status').textContent = 'The app could not start.';
+  const box = document.getElementById('error');
+  box.hidden = false;
+  box.textContent = 'Could not load the Rust app. Reload the page, or check your connection. ' + error;
+});
+</script>
+</body>
+</html>
