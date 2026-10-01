@@ -42,16 +42,6 @@
   --link: #79b8ff;
   --border: #2b303c;
   --danger: #ef6a6a;
-  /* The one token that does NOT follow the scheme, and the only one.
-
-     The icon is a fixed dark-grey glyph, pinned by a test to the author's
-     original file, so it cannot be recoloured per scheme — and at 1.8:1 it is
-     effectively invisible on either of this page's dark surfaces. Rather than
-     touch a committed asset, the mark sits on a small light chip, which is the
-     lightest thing on the page in dark mode and a quiet grey tile in light
-     mode. Same chip either way: one value, one reason, and the icon reads at
-     about 8:1 in both. */
-  --mark-bg: #e9ebee;
 }
 
 * { box-sizing: border-box; }
@@ -83,35 +73,7 @@ main {
   text-align: center;
 }
 
-/* The title and the mark share one line, the way a page header does there, and
-   the mark is the size of a status dot rather than the size of a logo: the
-   number is the app, the icon is only how you recognise it on a home screen.
-   It carries `--mark-bg` behind it, because the committed glyph is dark and
-   would otherwise disappear into the panel. */
-.head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: .45rem;
-  margin-bottom: .9rem;
-}
-
-.mark {
-  width: 20px;
-  height: 20px;
-  flex: none;
-  padding: 2px;
-  border-radius: .3rem;
-  background: var(--mark-bg);
-}
-
-h1 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 600;
-  color: var(--fg);
-}
-
+/* No heading, no logo, no status line: the readout is the whole interface. */
 #message {
   margin: 0 0 .9rem;
   font-family: var(--mono);
@@ -154,23 +116,17 @@ button:disabled {
   outline-offset: 3px;
 }
 
-.notes {
+/* The only line left below the button is the failure box, and it is hidden
+   until there is something to say — so when it does appear it carries its own
+   top rule, and the page shows no stray divider the rest of the time. */
+#error {
   margin: .9rem 0 0;
-  padding: .55rem 0 0;
+  padding-top: .55rem;
   border-top: 1px solid var(--border);
-  color: var(--muted);
+  color: var(--danger);
   font-size: .78rem;
   line-height: 1.5;
 }
-
-.notes p { margin: 0 0 .2rem; }
-
-.notes p:last-child { margin-bottom: 0; }
-
-/* The failure box is the one line on the page that is not muted: it is the only
-   one the reader has to act on, and it is hidden until there is something to
-   say. */
-#error { color: var(--danger); }
 
 @media (prefers-color-scheme: light) {
   :root {
@@ -196,10 +152,6 @@ button:disabled {
 </head>
 <body>
 <main>
-  <div class="head">
-    <img class="mark" src="./icon.svg" alt="" width="20" height="20">
-    <h1>Simple PWA</h1>
-  </div>
   <!-- The only element that changes when the app works. Rust owns its text from
        the first frame, so there is no "loading" state to flash: the number is
        real before the user can see it. `aria-live` makes every change announce
@@ -210,15 +162,12 @@ button:disabled {
        over from a template whose app only printed a greeting. -->
   <button id="hello-button" type="button">Add one</button>
 
-  <!-- One status line, not three. An element that can only ever show its initial
-       text is decoration pretending to be information, and a line that stays
-       frozen on "loading" is worse than no line at all. This one always changes:
-       Rust replaces it when the offline cache is ready, or when it could not be
-       set up. -->
-  <div class="notes">
-    <p id="offline-status">Getting this app ready for offline use…</p>
-    <p id="error" role="alert" hidden></p>
-  </div>
+  <!-- Nothing here says the app is ready for offline use. A line that only ever
+       reports good news the reader did not ask about is noise, and it was the
+       only thing standing between the button and the bottom of the panel. The
+       worker still registers, and the failure case below is the one worth a
+       line of the reader's attention. -->
+  <p id="error" role="alert" hidden></p>
 </main>
 <noscript>This counter needs JavaScript enabled. Turn it on and reload to use it.</noscript>
 <!-- The one script in the document: it hands over to the generated bindings and

@@ -390,7 +390,6 @@ fn the_page_is_accessible_and_installable() {
     for required in [
         "id=\"message\"",
         "id=\"hello-button\"",
-        "id=\"offline-status\"",
         "id=\"error\"",
         "role=\"status\"",
         "aria-live",
@@ -796,10 +795,12 @@ fn the_scope_is_a_relative_directory_shared_with_the_worker() {
 /// is a deliberate act with a visible diff rather than a silent one.
 /// The digest `assets/icon.svg` is recorded under.
 ///
-/// The original template's own file, byte for byte. It is the source every
-/// install icon is derived from, so it is pinned the way a lockfile pins a
-/// dependency: a red test is the intended, deliberate way to change it.
-const ICON_SHA256: &str = "fc82ef81db6f42ed9f098adb675218cfd8a980bfeb5c4e2509e08d5839f61851";
+/// Deliberately changed once, on 2026-10-01: the file had carried the original
+/// template's `P` glyph in dark `#434343`, and three bars in a mid grey replaced
+/// it. The pin is the mechanism working as intended — a red test, a visible
+/// diff, a reason — so it stays, and the reason moves here with the change
+/// rather than being left in a commit message to rot.
+const ICON_SHA256: &str = "5a7e307c7d61b27b8717fbe183be58f074af6c4ff438014ed246e0007cc24867";
 
 #[test]
 fn the_icon_is_the_committed_svg() {
@@ -809,11 +810,33 @@ fn the_icon_is_the_committed_svg() {
     assert_eq!(
         sha256_hex(&bytes),
         ICON_SHA256,
-        "assets/icon.svg is the author's original icon and must not change"
+        "assets/icon.svg is the icon, and a change to it must update ICON_SHA256 \
+         deliberately: the SVG is the source every install PNG is derived from"
     );
-    assert!(
-        String::from_utf8_lossy(&bytes).contains("#434343"),
-        "the icon is a one-colour transparent glyph"
+    // One colour, on a transparent ground — asserted where the colour actually
+    // is, not by searching the file for a string. A substring search over the
+    // whole SVG passes on this file's own comment, which names the old dark grey
+    // in exactly the sentence explaining why it went: a test that would survive
+    // the very thing it exists to catch.
+    //
+    // The mid grey is measured, not chosen by eye. A single static icon has to
+    // stay legible on a light surface and a dark one, and no grey can clear
+    // 4.5:1 on both — that needs a relative luminance below 0.18 and above 0.20
+    // at the same time. 3:1 is the bar for a graphical object, and `#7a7a7a`
+    // reaches 4.29:1 on white and 4.40:1 on this project's `#0f1117`.
+    let icon_text = String::from_utf8_lossy(&bytes);
+    let fills: Vec<&str> = icon_text
+        .match_indices("fill=\"")
+        .filter_map(|(at, _)| {
+            let rest = &icon_text[at + 6..];
+            rest.find('"').map(|end| &rest[..end])
+        })
+        .collect();
+    assert_eq!(
+        fills,
+        ["#7a7a7a"],
+        "the icon is one colour, and it is the legible midpoint between a light \
+         and a dark surface; found fills {fills:?}"
     );
     // The PNGs are build output: never committed, and never in the source tree
     // at all. They exist in `dist/`, which is the site and nothing else. The

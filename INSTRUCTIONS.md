@@ -52,6 +52,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Keep `id`, `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere.
 - Use `"display": "standalone"` unless the app specifically needs another mode.
 - Keep `assets/icon.svg` as the committed, authoritative icon — simple, one colour, transparent — and never replace it with a PNG.
+- Pick an icon colour that stays legible on a light surface and a dark one, and measure it rather than eyeballing it: a single static icon cannot clear 4.5:1 on both, so aim for the 3:1 bar for a graphical object and split the difference.
 - Rasterize the 192 and 512 install PNGs from that SVG at build time; they are build output.
 - Publish `assets/icon.svg` into `dist/` unchanged, beside the PNGs derived from it: the page links it and the worker precaches it.
 - Publish every file the page links or the worker precaches; a 404 in `caches.addAll` rejects the whole install, so one un-published file takes the service worker with it.
@@ -93,7 +94,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Use `prefers-color-scheme` when it is easy, set `color-scheme` alongside it, and respect `prefers-reduced-motion`.
 - Start from the palette in `src/ui.html` rather than inventing colours: it is the same dark-first token set the server this app is served beside uses, so a PWA opened from that origin does not look like a different product.
 - Give every foreground/background pair at least 4.5:1 contrast, and re-check any colour you change instead of assuming the token set already passed.
-- Keep the committed icon's colour. `assets/icon.svg` is pinned by a test, and a dark glyph on a dark panel is unreadable — put it on a light chip rather than editing the asset.
+- Show the user what the app does, and only what they can act on. Do not put a heading, a logo or a status line on the page to fill it, and never announce good news they did not ask about — "ready for offline use" is a fact about the cache, not about their app. A line earns its place only by telling the reader something changed or something is wrong.
 - Keep colors simple, but avoid making the whole app one undifferentiated hue.
 - Keep layout responsive with simple `grid`, `flex`, `width: min(...)` and media queries.
 - Keep CSS selectors purposeful: classes for styling, IDs for unique Rust hooks.

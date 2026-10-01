@@ -99,19 +99,23 @@ toolchain produce the same bytes.
 - `ui.rs`: the browser layer, and the only file that talks to the DOM. Reads the
   stored count, renders from state, binds one button, registers the service
   worker. It makes no decisions — everything it displays was decided and tested
-  in `counter.rs`.
+  in `counter.rs`. It reports nothing to the page: the worker registers, and
+  whether that worked is a console warning, not a line of the reader's screen.
 - `ui.html`: the static shell. One inline `<style>`, one `<script type="module">`
   whose whole body is a dynamic import with a failure message. The README of the
-  design is that a copy of this app renames six ids and deletes nothing.
+  design is that a copy of this app renames four ids and deletes nothing.
 - `service-worker.js`: install, activate, cache-first on an allowlist of `GET`s.
   No `skipWaiting`: an update takes over after the old tabs close, so a live app
   never swaps the wasm out from under itself.
 - `build.rs`: writes the six files it owns, rasterizes the install icons from the
   committed SVG, assembles the manifest, and derives the worker's cache version.
-- `assets/icon.svg`: the author's original icon, byte for byte, and the source of
-  every install icon. It is published to `dist/` unchanged and rasterized to the
-  two PNGs at build time; it is never replaced by a PNG and never regenerated.
-  Its SHA-256 is pinned in `tests/shell.rs`, so changing it is a deliberate act.
+- `assets/icon.svg`: the icon, and the source of every install icon. It is
+  published to `dist/` unchanged and rasterized to the two PNGs at build time; it
+  is never replaced by a PNG and never regenerated. Its SHA-256 is pinned in
+  `tests/shell.rs`, so changing it is a deliberate act. It was the original
+  template's `P` glyph until 2026-10-01, when three bars in a mid grey replaced
+  it: a letter read as decoration, and the old `#434343` was 1.9:1 on this
+  project's own dark background.
 
 ## Tests
 

@@ -32,18 +32,6 @@ use crate::counter::Counter;
 /// never renders from inside a borrow.
 type State = Rc<RefCell<Counter>>;
 
-/// Shown while the offline cache is still being set up. It is the only status
-/// line on the page, and it always changes: the app replaces it with one of the
-/// two messages below. A line that can only ever show its initial text is
-/// decoration pretending to be information.
-const OFFLINE_PENDING: &str = "Getting this app ready for offline use…";
-/// Shown when the offline cache could not be set up. Says what the user loses,
-/// not what the app is built with.
-const OFFLINE_UNAVAILABLE: &str =
-    "Offline use is unavailable. The app works, but you will need a connection.";
-/// Shown once the offline cache is in place.
-const OFFLINE_READY: &str = "Ready for offline use. Add it to your home screen to keep it handy.";
-
 /// The scope this app's worker is registered for.
 ///
 /// Stated rather than inherited, and it is the one string that has to agree
@@ -180,26 +168,22 @@ fn bind(window: &Window, document: &Document, state: &State) {
     closure.forget();
 }
 
-/// Register the service worker, then report the outcome on screen.
+/// Register the service worker, and release any stale registration.
+///
+/// Deliberately silent. This used to report the outcome on the page, and the
+/// page carried a line saying the app was ready for offline use — which is a
+/// thing the reader never asked to be told, on a line that existed only to hold
+/// it. The worker is a background concern: it either works, and the user
+/// notices nothing, or it does not, and the app still runs.
+///
+/// A registration failure is a console warning and nothing else. Nothing is
+/// lost that the reader can act on: the app works, online, exactly as before.
 ///
 /// Called from an `async` start function, but it does not block the app: the
-/// registration is awaited, the readiness is not. The page is interactive
-/// before either finishes, because offline support is not worth a blank screen.
-///
-/// Registration failure is a warning, not a crash: the app works without the
-/// worker, it just will not open offline. Saying so where the user can read it
-/// beats a console line nobody does.
+/// registration is awaited, the page is interactive before it finishes, because
+/// offline support is not worth a blank screen.
 async fn announce_offline(window: Window) {
-    let Some(document) = window.document() else {
-        return;
-    };
     let container = window.navigator().service_worker();
-
-    // Written from Rust rather than left to the shell's markup, so the pending
-    // text has exactly one owner. The shell ships the same sentence for the
-    // first paint; this overwrites it with the same constant, which is a no-op
-    // in content and a guarantee that the two cannot drift.
-    set_text(&document, "offline-status", OFFLINE_PENDING);
 
     // The scope is stated rather than inherited. Left to itself, a
     // registration's scope is the directory of the page that registered it,
@@ -215,23 +199,7 @@ async fn announce_offline(window: Window) {
         JsFuture::from(container.register_with_options("./service-worker.js", &options)).await
     {
         warn("service worker registration failed", error);
-        set_text(&document, "offline-status", OFFLINE_UNAVAILABLE);
         return;
-    }
-
-    // `ready` settles when the worker controls the page, which is the moment
-    // caching is finished and the next reload will work offline.
-    if let Ok(promise) = container.ready() {
-        let reported: Rc<Document> = Rc::new(document);
-        let announce = Closure::<dyn FnMut(JsValue)>::new(move |_| {
-            set_text(&reported, "offline-status", OFFLINE_READY);
-        });
-        // `then` hands back a promise nobody waits on, which is fine: its only
-        // rejection would be the registration's, already handled above. The
-        // `forget` on the closure is what keeps the callback alive until it
-        // runs; the promise needs no owner in wasm.
-        let _settled = promise.then(&announce);
-        announce.forget();
     }
 
     release_stale_registrations(&window).await;

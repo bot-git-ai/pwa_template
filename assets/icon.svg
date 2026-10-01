@@ -1,6 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <path
-    fill="#434343"
-    d="M160 96h128c72 0 120 48 120 116s-48 116-120 116h-56v88h-72V96Zm72 72v88h56c30 0 48-18 48-44s-18-44-48-44h-56Z"
-  />
+  <!-- Three bars of increasing height: counting, and nothing else. No letter,
+       no enclosing shape, one colour on a transparent ground.
+
+       The colour is a mid grey rather than the dark `#434343` this file used to
+       carry, and that is a deliberate trade. A single static icon has to be
+       legible on a light tab bar and a dark one, and no grey can clear 4.5:1
+       on both (that needs a luminance at once below 0.18 and above 0.20). The
+       bar for a graphical object is 3:1, and `#7a7a7a` reaches 4.29:1 on white
+       and 4.40:1 on this project's `#0f1117` — the best balance available,
+       rather than a colour that is legible on one scheme and invisible on the
+       other. Re-measure if the palette changes.
+
+       `build.rs` rasterizes the 192 and 512 install PNGs from this file, so
+       this is the icon and the PNGs are derived output. -->
+  <g fill="#7a7a7a">
+    <rect x="128" y="288" width="56" height="64" rx="28" />
+    <rect x="228" y="224" width="56" height="128" rx="28" />
+    <rect x="328" y="160" width="56" height="192" rx="28" />
+  </g>
 </svg>
