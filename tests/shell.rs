@@ -1240,6 +1240,8 @@ fn the_generator_is_installed_from_the_declared_variable() {
 /// publishing permissions live in the one job that is gated on it.
 #[test]
 fn only_master_can_reach_the_live_site() {
+    // Already comment-stripped: every assertion below reads the live gate, and
+    // the prose directly above it names both halves of the gate it explains.
     let Some(pages) = live_pages_workflow() else {
         return;
     };
@@ -1260,8 +1262,8 @@ fn only_master_can_reach_the_live_site() {
     );
 
     // The deploy job's gate, named so the assertion cannot be satisfied by a
-    // gate on some other job. This is the check that holds when the trigger is
-    // widened by accident.
+    // gate on some other job. This is the check that actually holds when the
+    // trigger is widened by accident.
     let deploy = pages
         .split("\n  deploy:")
         .nth(1)
@@ -1274,6 +1276,72 @@ fn only_master_can_reach_the_live_site() {
         deploy.contains("\n    if:"),
         "the `deploy` job must carry an `if:` gate at job level; `needs: build` alone still \
          runs for every trigger",
+    );
+
+    // ... and it must ALSO be gated on not being a fork. This workflow is
+    // byte-identical in `wdomitrz/pwa_template` and in its fork
+    // `bot-git-ai/pwa_template` -- a fork exists precisely so its files can be
+    // copied -- so a gate that tests only the branch name cannot tell the two
+    // repositories apart: both have a `master`, and a push to the fork's master
+    // tries to publish a site it was never given. Two things go wrong, and the
+    // first is the one that happens: a fork has no Pages site of its own until
+    // someone enables one by hand, so every push to fork master dies at
+    // "Creating Pages deployment failed ... Ensure GitHub Pages has been
+    // enabled", after a green build and a full site check. And were Pages
+    // enabled there, the fork would serve its own divergent copy.
+    //
+    // `github.event.repository.fork` is the discriminator because it needs no
+    // configuration: the event supplies it, false upstream and true in the fork.
+    // The obvious alternative, a repository Actions variable, has the failure
+    // mode this assertion exists to prevent -- it would have to be set on the
+    // *user's* repository to publish, and no account but the user's can do that,
+    // so the gate would ship as silently off on the one repository that owns
+    // the site.
+    //
+    // Read the gate out of the comment-stripped workflow, never the raw one:
+    // the comment block directly above this `if:` names both halves while
+    // explaining them, so an assertion over raw text is satisfied by the prose
+    // with the clause deleted. That is not hypothetical -- it is how the
+    // `RUSTFLAGS` assertion in `chess_clock`'s equivalent file shipped.
+    let live_gate = pages
+        .split("\n  deploy:")
+        .nth(1)
+        .and_then(|job| job.split_once("if:"))
+        .map(|(_, after)| after.lines().next().unwrap_or_default())
+        .expect("the `deploy` job must have an `if:` gate");
+    assert!(
+        live_gate.contains("!github.event.repository.fork"),
+        "the `deploy` job's `if:` must test `!github.event.repository.fork`; this workflow is \
+         byte-identical in the fork `bot-git-ai/pwa_template`, so a branch-name-only gate \
+         publishes from the fork too -- failing with 'Ensure GitHub Pages has been enabled' \
+         until Pages is enabled there, and serving a divergent copy afterwards. Found: \
+         {live_gate:?}",
+    );
+    // And the fork rule must *extend* the master gate, not replace it. Two `if:`
+    // keys in one job is not an AND -- YAML keeps the last one -- so a gate that
+    // keeps `github.ref` and adds `!fork` on a second line is the only correct
+    // spelling, and dropping the master half would publish from every branch.
+    assert!(
+        live_gate.contains("github.ref == 'refs/heads/master'"),
+        "the fork clause must extend the master gate rather than replace it: `deploy` must be \
+         ONE `if:` testing both `github.ref` and `github.event.repository.fork`. Found: \
+         {live_gate:?}",
+    );
+    // Exactly one gate, so the clause cannot be split onto a second `if:` that
+    // silently overrides the first.
+    assert_eq!(
+        deploy.matches("\n    if:").count(),
+        1,
+        "the `deploy` job must have exactly one `if:`; a second one silently replaces the first \
+         in YAML, which is how a half-written gate ends up publishing",
+    );
+    // And the forbidden alternative, so the documented mistake cannot come back
+    // through a copy of an earlier draft.
+    assert!(
+        !pages.contains("vars.PUBLISH_PAGES"),
+        "pages.yml gates the deploy on `vars.PUBLISH_PAGES`; it would have to be set on the \
+         user's own repository to publish and this account holds only `pull` there, so the gate \
+         ships as silently off on the repository that owns the site",
     );
 
     // The permissions that can actually publish must be scoped to `deploy`,
