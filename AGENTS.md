@@ -67,6 +67,43 @@ shell; in a bare or non-login shell call it by absolute path
 bindings the runtime will not load, and the page then fails to start with "The
 app could not start", which looks like an app bug and is not one.
 
+## No compiler flag is needed, and adding one would be wrong
+
+There is no `.cargo/config.toml`, no `RUSTFLAGS`, and there should be neither.
+`--cfg=web_sys_unstable_apis` is for web-sys's unstable surface — the Screen
+Wake Lock API, whose `WakeLockSentinel` type is behind that cfg in web-sys
+0.3.105 and is unreachable without it even with the cargo features enabled.
+**This template uses no unstable API.** Verified 2026-10-02: a wasm build with
+a fresh `CARGO_TARGET_DIR`, no `RUSTFLAGS` and no `.cargo/config.toml` finishes
+clean, in 7m41s.
+
+So a copy-and-rename should not acquire the flag, and a reviewer should distrust
+a workflow that carries it. The reason is not tidiness. Several web-sys getters
+are typed *differently* behind that cfg — `MouseEvent::client_x` is `i32` on
+the stable path and `f64` behind it, and `PointerEvent` inherits the type — so
+a workflow setting a cfg the crate is not built with makes the wasm clippy run
+lint a **different program from the one that ships**. The host clippy run cannot
+see it, because the host build compiles no web-sys code at all. `chwazi` sets no
+`RUSTFLAGS` and says why at length in its own `build.yml`.
+
+If a generated app *does* add an unstable API, three things have to move
+together, and the cfg is the smallest of them:
+
+- the `web-sys` cargo features for what it calls (necessary, and **not**
+  sufficient on their own);
+- `RUSTFLAGS: --cfg=web_sys_unstable_apis` in the workflows' top-level `env:`,
+  not on one step, so the wasm clippy run sees it too;
+- the app's AGENTS.md, saying which API and why.
+
+`.cargo/config.toml` is the better long-term home for the flag — it travels with
+the repository, so a fresh CI runner and a plain `cargo build` both get it
+without anything to remember — but `build.rs` does **not** work, and it is worth
+saying why, because the failure is silent. `cargo:rustc-cfg` applies only to the
+*building* package's own units, and web-sys is a registry dependency compiled in
+its own unit, so the cfg never reaches it. A `compile_error!` probe inside the
+crate confirms the cfg *is* set on the local crate, which is exactly why the
+technique looks like it works.
+
 ## The static site
 
 Eight files, from two builds, and two owners:
@@ -86,6 +123,37 @@ any subdirectory. Any file host can publish it: nginx, Caddy, GitHub Pages,
 
 `dist/` is gitignored. It is reproducible: the same sources and the same pinned
 toolchain produce the same bytes.
+
+## Publishing it
+
+Two workflows, deliberately separate.
+
+`.github/workflows/build.yml` runs on every push and pull request, with
+`contents: read` and nothing else. It runs both build steps in the order above
+and inspects the `dist/` they produced.
+
+`.github/workflows/pages.yml` publishes the site to GitHub Pages on every merge
+to master, and on no other ref. It is a **separate file, not extra steps in
+`build.yml`**, because a deploy needs `pages: write`, `id-token: write` and the
+`github-pages` environment, and `build.yml` runs on pull requests from forks
+where none of those exist. Folding them together would make the CI build
+unrunnable by anyone who can push a branch, and would put the power to overwrite
+the live site on every ref. Both publishing permissions are scoped to the
+`deploy` job alone, never granted workflow-wide, so a build step or a
+third-party action added later cannot spend them.
+
+The Pages workflow rebuilds the site rather than passing `build.yml`'s artifact
+across: `upload-pages-artifact` is not `upload-artifact`, the Pages artifact is a
+single tarball the deploy then finds *by name*, and `deploy-pages` v5 has no
+`artifact_id` input — it warns `Unexpected input(s) 'artifact_id'`, ignores it,
+and falls back to its own default. Both sides therefore state `artifact_name`
+explicitly and `tests/shell.rs` asserts they are the same string, so a mismatch
+is a diff rather than a bare `HttpError: Not Found` at run time.
+
+**Pages must be enabled in the repository's settings** (Settings → Pages →
+Source → GitHub Actions) before any of this deploys. That is a one-time action
+by the repository's owner, and it is not something a workflow can do for itself.
+Until then the deploy job fails and the build half of it is still true.
 
 ## Code map
 
@@ -181,11 +249,35 @@ and has no app in it, and a `dist/` that has everything except one file nobody
 wrote. It fails on unexpected files as well as missing ones, because a stray
 ships exactly as quietly as an absence does.
 
+`tests/shell.rs` also asserts the *shape* of both workflows, reading them with
+comments stripped — commenting a line out instead of deleting it is the mutation
+most likely to be applied to any of them, and it satisfies an assertion that
+reads raw text. Eleven of those: the generator pin matches `Cargo.toml` and is
+declared rather than only used; no `RUSTFLAGS` where the crate needs none; master
+is the only ref that can reach the live site; the publishing permissions are in
+the `deploy` job and nowhere else; the deploy is handed the artifact the build
+uploaded, by name; the deploy is not in `build.yml`; every action is pinned to a
+40-character commit SHA; the site check names all eight files and greps the
+things a green build cannot imply; and both workflows pin the icon digest this
+repository actually has.
+
+That last one is not decoration. The icon's SHA-256 lives in three places — the
+`ICON_SHA256` constant in `tests/shell.rs` and one copy in each workflow's site
+check — and the icon changed on 2026-10-01 from the `P` glyph to three bars.
+That commit updated the constant and the icon, and **not** `build.yml`, so the
+build sat red from then until 2026-10-02, when adding `pages.yml` forced the
+check to be run for real rather than assumed green. The workflow copies now
+carry the reason, and the test asserts both equal the file on disk, so the three
+cannot drift apart again.
+
 ## Known limitations
 
 - `wasm-bindgen` must be installed separately and must match `=0.2.128` exactly.
   CI installs the pinned prebuilt binary and verifies it against both the
   release's own checksum and a digest recorded in the workflow.
+- GitHub Pages is off until someone enables it in the repository's settings, so
+  the Pages deploy's `deploy` job fails until they do. The build half of that
+  workflow is still true and still checked.
 - The counter is deliberately trivial. It is here to be replaced, not extended.
 - Offline support needs one successful visit over HTTPS or localhost, and
   clearing site data removes it. That is the platform, not this app.

@@ -115,9 +115,14 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Put both build steps in `.github/workflows/build.yml`, and have the workflow verify the built site rather than trust a green job.
 - Write that check's multi-line Python as a `<<'PY'` heredoc, never `python3 -c`: an indented `-c` body breaks on shell quoting, not on Python.
 - Lint the wasm target with the same `RUSTFLAGS`/`rustc-cfg` the crate builds with; `web-sys` changes an accessor's return type under `--cfg=web_sys_unstable_apis`, so a leg without it is a false green.
+- Add no compiler flag this app does not need: a clean wasm build needs no `--cfg=web_sys_unstable_apis`, and carrying one lints a different program from the one that ships.
+- Put the GitHub Pages deploy in its own workflow, never in `build.yml`, and scope `pages: write`/`id-token: write` to the deploy job alone; a fork PR has neither permission nor the environment.
+- Deploy on master only, never on tags, and hand `deploy-pages` the artifact by `artifact_name`; v5 has no `artifact_id` input and ignores one.
 - Check the built site by naming every file, not by counting: a file that is referenced but never written does not change the count.
 - Fail on unexpected files as well as missing ones; a file nobody meant to publish is as much a defect as one that is absent, and neither shows up in a green build.
 - Check the manifest against what was actually rasterized, not against a copy of the source.
+- Keep a pinned digest in one place only, and assert it against the file; a digest copied into a second file is a second copy of the truth that drifts silently.
+- Assert a workflow's settings from its own text with comments stripped, and read the value out rather than searching for a fixed string; commenting a line out otherwise satisfies the assertion.
 
 ## Never commit build artifacts
 

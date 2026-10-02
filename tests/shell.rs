@@ -938,8 +938,15 @@ fn the_instructions_are_still_a_short_flat_list() {
         "INSTRUCTIONS.md must open with a heading"
     );
     let rules: Vec<&str> = text.lines().filter(|line| line.starts_with("- ")).collect();
+    // The upper bound moved once, on 2026-10-02, from 90 to 95, when the GitHub
+    // Pages rules were added: publishing the site is part of the contract, and
+    // the failures it guards — a deploy in the CI build, publishing permissions
+    // granted workflow-wide, an `artifact_id` that v5 silently ignores — are
+    // all silent. It is a deliberate change and the reason is here rather than
+    // in a commit message, so the next person to hit the bound knows what the
+    // number is guarding against and does not raise it again on a whim.
     assert!(
-        rules.len() >= 30 && rules.len() <= 90,
+        rules.len() >= 30 && rules.len() <= 95,
         "the rules must stay a short list, not an essay: {} rules",
         rules.len()
     );
@@ -982,6 +989,742 @@ fn the_instructions_are_still_a_short_flat_list() {
     assert!(
         !text.contains("npx "),
         "INSTRUCTIONS.md still sends the reader to npx"
+    );
+}
+
+/// A workflow file, as committed.
+///
+/// Nonexistent is not a reason to fail. The release gate exports the candidate
+/// tree, and a partial export of a release branch need not carry every workflow;
+/// a test that hard-failed on absence would make such an export red for a reason
+/// that says nothing about the app. Callers say which they want — and the ones
+/// that matter here also run only in a full checkout.
+fn workflow(name: &str) -> Option<String> {
+    let path = root().join(".github/workflows").join(name);
+    std::fs::read_to_string(&path).ok()
+}
+
+/// A workflow with its comments removed.
+///
+/// A `#` inside a quoted string is not a comment, and these workflows quote
+/// nothing in the keys they are read for — but the point is not the corner case.
+/// It is that commenting a line out instead of deleting it is the exact mutation
+/// most likely to be applied to one of the lines below, and a `# RUSTFLAGS:`
+/// satisfies a `contains` assertion that reads the raw text. Every assertion
+/// about a setting reads this, not the file.
+fn strip_yaml_comments(source: &str) -> String {
+    source
+        .lines()
+        .map(|line| match line.find('#') {
+            Some(index) => &line[..index],
+            None => line,
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `pages.yml` with its comments removed, or `None` if it is absent.
+///
+/// Every workflow assertion reads this rather than the file: commenting a line
+/// out instead of deleting it is the mutation most likely to be applied to any
+/// of the settings below, and `# RUSTFLAGS:` satisfies a `contains` on the raw
+/// text while changing nothing about the job. That mistake was made and shipped
+/// once already, in this family.
+fn live_pages_workflow() -> Option<String> {
+    workflow("pages.yml").map(|text| strip_yaml_comments(&text))
+}
+
+/// The workflow's top-level `env:` block, as key → value.
+///
+/// Reading the block rather than searching the whole file is what lets a test
+/// ask "is this set at the *top level*", which is a question about indentation
+/// and cannot be answered by `contains`. A `RUSTFLAGS:` set on one step does
+/// not reach the other clippy run; a comment saying it does must not satisfy
+/// anything, so this reads `strip_yaml_comments` output.
+///
+/// The block ends at the first column-zero key — `permissions:` here — so a
+/// value belonging to some other top-level section cannot be mistaken for one.
+fn top_level_env(yaml: &str) -> Option<std::collections::BTreeMap<String, String>> {
+    let mut declared = std::collections::BTreeMap::new();
+    let mut in_env = false;
+    let mut saw_env = false;
+    for line in yaml.lines() {
+        if line.is_empty() {
+            continue;
+        }
+        if !line.starts_with(' ') {
+            in_env = line.trim_start().starts_with("env:");
+            saw_env |= in_env;
+            continue;
+        }
+        if !in_env {
+            continue;
+        }
+        let trimmed = line.trim_start();
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        declared.insert(
+            key.to_owned(),
+            value.trim().trim_matches(['"', '\'']).to_owned(),
+        );
+    }
+    saw_env.then_some(declared)
+}
+
+/// The Pages workflow must not install a bindings generator for a runtime the
+/// crate is not built against.
+///
+/// `Cargo.toml` pins `wasm-bindgen = "=0.2.128"` exactly; the job installs its
+/// own CLI from a variable in `env:`. Move the dependency and the workflow keeps
+/// building happily: it generates bindings for a runtime the page does not have,
+/// and the only symptom is a live site that fails at startup with "The app
+/// could not start" — for every visitor, and only in a browser.
+///
+/// So the two are asserted equal here rather than trusted to be edited
+/// together. And the *declaration* is asserted as well as the use: an undeclared
+/// `WASM_BINDGEN_VERSION` expands to nothing, the generator step installs no
+/// generator, and every other check here passes — which is how an earlier
+/// version of `pages.yml` published a site with no app in it.
+#[test]
+fn the_pages_build_generates_bindings_for_the_pinned_runtime() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+
+    // Read the pin the way Cargo writes it: `wasm-bindgen = "=0.2.128"`.
+    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
+    let pinned = manifest
+        .lines()
+        .find_map(|line| {
+            // The line must *be* the dependency, not merely mention it:
+            // `wasm-bindgen-futures = "0.4.78"` sits next to it, and a
+            // `starts_with("wasm-bindgen")` matches both.
+            let rest = line.trim().strip_prefix("wasm-bindgen = ")?;
+            let rest = rest.trim().trim_matches('"');
+            (!rest.is_empty()).then_some(rest)
+        })
+        .expect("Cargo.toml pins a wasm-bindgen version");
+    assert!(
+        pinned.starts_with('='),
+        "Cargo.toml must pin wasm-bindgen exactly ({pinned:?}), so there is one version for \
+         the crate and one for the bindings generator; a caret would resolve to whatever \
+         the lockfile holds and the workflow's literal would name one arbitrary version",
+    );
+    // `pinned` is `"=0.2.128"`, quotes stripped: the `=` is part of the value.
+    let version = pinned.trim_start_matches('=');
+
+    let Some(env) = top_level_env(&pages) else {
+        panic!(
+            "pages.yml must have a top-level `env:` block declaring WASM_BINDGEN_VERSION: \
+             {version}; the install step reads $WASM_BINDGEN_VERSION, an undeclared variable \
+             expands to nothing, and the job would then publish bindings for no runtime"
+        );
+    };
+    assert_eq!(
+        env.get("WASM_BINDGEN_VERSION").map(String::as_str),
+        Some(version),
+        "pages.yml's WASM_BINDGEN_VERSION must be exactly the Cargo.toml pin ({version})",
+    );
+}
+
+/// This template must not carry a wake-lock cfg it does not need, and must not
+/// be told it does.
+///
+/// Verified 2026-10-02: a clean wasm build — fresh `CARGO_TARGET_DIR`, no
+/// `RUSTFLAGS`, no `.cargo/config.toml` — finishes, so the crate compiles
+/// without `--cfg=web_sys_unstable_apis`. That cfg is for web-sys's unstable
+/// surface (the Screen Wake Lock), and this crate does not use it.
+///
+/// The rule is the *agreement*, not the absence: whatever the crate is built
+/// with is what the workflow must lint with. A workflow carrying a cfg the
+/// crate is not built with does not merely waste a flag — web-sys types several
+/// getters differently behind it (`MouseEvent::client_x` is `i32` normally,
+/// `f64` with the cfg), so the wasm clippy run reads a green about a different
+/// program from the one that ships, and only that run can see it.
+///
+/// So this asserts the workflow declares no `RUSTFLAGS` at all, and — so a
+/// future app that legitimately adds the Wake Lock gets a *changed* test with a
+/// reason rather than a deleted one — names where the cfg would go.
+#[test]
+fn the_pages_workflow_declines_a_cfg_this_crate_does_not_need() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+
+    let env = top_level_env(&pages).unwrap_or_default();
+    assert!(
+        !env.contains_key("RUSTFLAGS"),
+        "pages.yml declares RUSTFLAGS={}; this template uses no unstable web-sys API and its \
+         wasm build was verified clean without it, so the flag can only make the wasm clippy \
+         run lint a different web-sys than the one that ships. If you have added an unstable \
+         API, set it here deliberately and update this test with the reason",
+        env.get("RUSTFLAGS").map_or("", String::as_str),
+    );
+
+    // The same for `Cargo.toml`: a `[target.wasm32...] rustflags` there is
+    // documented as ignored for non-path dependencies, so it would be a line
+    // that looks load-bearing and is not.
+    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
+    assert!(
+        !manifest.contains("rustflags"),
+        "Cargo.toml sets rustflags; cargo ignores `[target.*.rustflags]` for registry \
+         dependencies, so this would not reach web-sys and only look like it does",
+    );
+
+    // And no `.cargo/config.toml`: none exists, and adding one for a flag this
+    // crate does not need would put the same dead configuration in every repo
+    // generated from the template.
+    let config = root().join(".cargo/config.toml");
+    assert!(
+        !config.exists(),
+        ".cargo/config.toml must not exist: this crate needs no compiler flag, and a copy of \
+         the template would inherit a configuration with nothing in it to justify",
+    );
+}
+
+/// The generator version must be declared in `env:`, not written as a literal
+/// into the install step — and the install step must actually read it.
+///
+/// These are two different mistakes. A literal in the step is right once and
+/// wrong forever after the pin moves, and the test above cannot catch it because
+/// it only compares against `Cargo.toml`. A `$WASM_BINDGEN_VERSION` with no
+/// declaration installs nothing. So: the use must be there, and it must be the
+/// variable, not a hard-coded string.
+#[test]
+fn the_generator_is_installed_from_the_declared_variable() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+    // Read the value off its own line rather than splitting the whole file: a
+    // `split_once('"')` on the text that follows runs past the closing quote
+    // and across a dozen lines into unrelated shell, which reads as a
+    // catastrophic failure and is really a bad parse.
+    let mut uses = pages.lines().filter_map(|line| {
+        let value = line.trim().strip_prefix("version=")?;
+        let value = value.strip_prefix('"')?;
+        value.split('"').next()
+    });
+    let install = uses.next().expect(
+        "pages.yml must pass a `version=\"…\"` to the install step, so the pin in \
+         Cargo.toml has one place to be wrong",
+    );
+    assert_eq!(
+        install, "$WASM_BINDGEN_VERSION",
+        "pages.yml must install the generator with version=\"$WASM_BINDGEN_VERSION\" rather \
+         than a literal, so the pin in Cargo.toml has exactly one place to be wrong; found \
+         version=\"{install}\"",
+    );
+    // And nowhere else: `asset="wasm-bindgen-${version}-…"` builds the download
+    // name from the same variable, so exactly one `version="` may exist. Two
+    // means one of them is a literal, and the test above — which reads only the
+    // first — would pass on the variable while the install used the other.
+    assert_eq!(
+        pages.matches("version=\"").count(),
+        1,
+        "pages.yml must name the generator version exactly once, as \
+         version=\"$WASM_BINDGEN_VERSION\"; a second occurrence is a hard-coded literal the \
+         first assertion cannot see",
+    );
+}
+
+/// A deploy that can run from any branch is a deploy a stranger can run.
+///
+/// `pages: write` and `id-token: write` are the two permissions that let a job
+/// overwrite the live site, and the token behind them is minted for the
+/// repository however the workflow was reached. The project *wants* an automatic
+/// deploy on every merge to master — that is the point, and it is why nobody
+/// has to remember to publish. What it does not want is that power on every
+/// other ref, so the invariant asserted here is the one that survives the
+/// convenience: master is the only ref that can reach the live site, and the
+/// publishing permissions live in the one job that is gated on it.
+#[test]
+fn only_master_can_reach_the_live_site() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+
+    // The trigger must be the named branch, not a bare `push:`. A bare `push:`
+    // deploys from every branch that exists, including a contributor's.
+    assert!(
+        pages.contains("branches: [master]"),
+        "pages.yml must trigger on `branches: [master]`, not a bare `push:`, which deploys \
+         from every branch including other people's",
+    );
+    // A tag trigger alongside the branch trigger would publish a version that
+    // was never on master.
+    assert!(
+        !pages.contains("tags:"),
+        "pages.yml must not also deploy on tags; a tagged commit that never reached master \
+         would be published to the live site",
+    );
+
+    // The deploy job's gate, named so the assertion cannot be satisfied by a
+    // gate on some other job. This is the check that holds when the trigger is
+    // widened by accident.
+    let deploy = pages
+        .split("\n  deploy:")
+        .nth(1)
+        .expect("pages.yml must have a `deploy:` job");
+    assert!(
+        deploy.contains("github.ref == 'refs/heads/master'"),
+        "the `deploy` job must be gated on the build being for master",
+    );
+    assert!(
+        deploy.contains("\n    if:"),
+        "the `deploy` job must carry an `if:` gate at job level; `needs: build` alone still \
+         runs for every trigger",
+    );
+
+    // The permissions that can actually publish must be scoped to `deploy`,
+    // not granted workflow-wide, so a build step or a third-party action added
+    // later cannot spend them.
+    let build = pages
+        .split("\n  build:")
+        .nth(1)
+        .and_then(|after| after.split("\n  deploy:").next())
+        .expect("pages.yml must have a `build:` job");
+    for forbidden in ["pages: write", "id-token: write"] {
+        assert!(
+            !build.contains(forbidden),
+            "the `build` job must not hold `{forbidden}`; those belong to `deploy` alone",
+        );
+    }
+    // And the workflow-level `permissions:` must not grant them either — that is
+    // exactly the "workflow-wide" grant being ruled out.
+    let header = pages.split("\njobs:").next().unwrap_or_default();
+    for forbidden in ["pages: write", "id-token: write"] {
+        assert!(
+            !header.contains(forbidden),
+            "the workflow-level `permissions:` must not grant `{forbidden}`; scope it to the \
+             `deploy` job",
+        );
+    }
+}
+
+/// The deploy has to be handed something the upload actually produced.
+///
+/// `deploy-pages` v5 takes `artifact_name`. There is no `artifact_id` input:
+/// passing one is reported as `Unexpected input(s) 'artifact_id'` and ignored,
+/// and the action falls back to its own default — which is only right while the
+/// upload side defaults to the same string. Change one side and the deploy finds
+/// no artifact and fails with a bare `HttpError: Not Found` that names nothing.
+///
+/// So the names are read out of the live text and compared, rather than
+/// asserting a fixed string: the invariant is the agreement, not the particular
+/// name.
+#[test]
+fn the_deploy_is_handed_the_artifact_the_build_uploaded() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+
+    // The input v5 does not have. Its presence is a warning at run time and
+    // never an error, so nothing else would ever report it.
+    assert!(
+        !pages.contains("artifact_id:"),
+        "pages.yml passes `artifact_id` to deploy-pages v5, which has no such input; it is \
+         warned about and ignored, leaving the deploy to guess the artifact name",
+    );
+
+    // Read the two keys where they are the artifact's own. `artifact_name:` is
+    // unique; the upload's `name:` is the one under the upload step's `with:`.
+    let value_of = |key: &str| -> Option<String> {
+        let mut in_with = false;
+        for line in pages.lines() {
+            let trimmed = line.trim();
+            if trimmed == "with:" {
+                in_with = true;
+                continue;
+            }
+            // A new key at or left of the step's own indent ends the `with:` block.
+            if in_with && !line.starts_with("          ") && !trimmed.starts_with('#') {
+                in_with = false;
+            }
+            if in_with && trimmed.starts_with(&format!("{key}: ")) {
+                return Some(
+                    trimmed[format!("{key}: ").len()..]
+                        .trim()
+                        .trim_matches('"')
+                        .to_owned(),
+                );
+            }
+        }
+        None
+    };
+    let uploaded = value_of("name").expect(
+        "pages.yml must state the upload step's artifact `name:`, so the deploy has something \
+         to match",
+    );
+    let deployed = value_of("artifact_name").expect(
+        "pages.yml must pass `artifact_name:` to deploy-pages, rather than leaving it to a \
+         default that can drift from the upload",
+    );
+    assert_eq!(
+        uploaded, deployed,
+        "the artifact the build uploads ({uploaded:?}) and the one the deploy asks for \
+         ({deployed:?}) must be the same name",
+    );
+
+    // And it must be the Pages uploader, not the generic one, which produces a
+    // differently-shaped artifact the deploy cannot find.
+    assert!(
+        pages.contains("actions/upload-pages-artifact@"),
+        "pages.yml must use actions/upload-pages-artifact; actions/upload-artifact produces a \
+         different artifact and the deploy then fails to find what it was given",
+    );
+}
+
+/// The two workflows must pin the icon the repository *actually has*.
+///
+/// `assets/icon.svg` is the source every install PNG is derived from, and both
+/// workflows assert that `dist/icon.svg` is that file byte for byte and that its
+/// digest is the author's original. That check is what caught the workflow
+/// sitting red from 2026-10-01 to 2026-10-02: the icon changed from the `P`
+/// glyph to three bars, `tests/shell.rs`'s `ICON_SHA256` was updated, and
+/// `build.yml`'s copy was not — the same pin, kept in two places, drifting.
+///
+/// This test is the one that stops the third place from drifting too. It reads
+/// the digest out of each workflow and asserts both equal the constant the icon
+/// test uses, and that the constant still matches the file on disk.
+#[test]
+fn both_workflows_pin_the_icon_the_repository_still_has() {
+    let icon = root().join("assets/icon.svg");
+    let bytes =
+        std::fs::read(&icon).unwrap_or_else(|error| panic!("reading {}: {error}", icon.display()));
+    let digest = sha256_hex(&bytes);
+
+    for workflow_name in ["build.yml", "pages.yml"] {
+        let Some(text) = workflow(workflow_name) else {
+            continue; // a partial export need not carry every workflow
+        };
+        let live = strip_yaml_comments(&text);
+        assert!(
+            live.contains(&digest),
+            "{} pins a digest for assets/icon.svg that is not the icon this repository has \
+             (the file hashes to {digest}); the workflow has been red since the icon changed, \
+             and shipping it would pin the wrong icon as 'the author's original'",
+            workflow_name,
+        );
+    }
+}
+
+/// The site check the workflow runs must assert on the site, not on the exit
+/// status.
+///
+/// No test in this file can assert on `dist/`: it is gitignored, so the release
+/// gate's exported tree never has it. The workflow is therefore the only
+/// automated coverage of the built output, and it has to check the things a
+/// green build cannot imply — the file list, the substituted cache version, the
+/// bindings' exports and start function, the icons being real PNGs, and the page
+/// calling the initializer. Each of these is a failure that is otherwise
+/// completely silent: a site that loads and never starts shows nothing but a
+/// blank page, long after the build looked fine.
+#[test]
+fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
+    let Some(pages) = workflow("pages.yml") else {
+        return;
+    };
+    let live = strip_yaml_comments(&pages);
+
+    // Every one of the eight files, by name. Naming them is the point: the
+    // failure this exists for is a `dist/` that looks publishable and is missing
+    // something the page references, and a file nobody wrote does not change a
+    // count.
+    //
+    // Read the list out of the workflow's own `expected=` assignment rather than
+    // asserting eight literals here: a second hand-kept list would be a second
+    // copy of the truth, which is the mistake this whole file is written
+    // against. It drifts the moment someone adds a file to one place and not
+    // the other — and `DIST_FILES` is derived from the two owners, so an
+    // eight-item list is available for free.
+    let expected = live
+        .lines()
+        .find_map(|line| {
+            // The whole line must be the assignment, not merely contain it:
+            // `missing="${missing}"` ends in the same characters, and that line
+            // comes first. A test that reads the wrong line of the right file
+            // is worse than one that reads nothing.
+            let value = line.trim().strip_prefix("expected=")?;
+            value.strip_prefix('"')?.strip_suffix('"')
+        })
+        .expect("pages.yml must state the files it expects as an `expected=\"...\"` list");
+    let listed: Vec<&str> = expected.split_whitespace().collect();
+    assert_eq!(
+        listed, DIST_FILES,
+        "pages.yml's site check names these files; they must be exactly the eight the two \
+         owners produce, in one list, derived from the same source",
+    );
+    // And it must fail on unexpected files as well as missing ones, checked by
+    // listing what is there and diffing it against that same list rather than
+    // counting: a stray file ships exactly as quietly as an absence. Read as a
+    // line, not as a substring of one — `grep -q -v -f` looks much like
+    // `grep -x -F -v -f`, and a substring assertion over shell is a way of
+    // feeling safe without being so.
+    assert!(
+        live.lines()
+            .any(|line| line.contains("grep -x -F -v -f") && line.contains("extra=")),
+        "pages.yml must reject unexpected files in dist/ as well as missing ones, by listing \
+         what is there and diffing it against the expected list",
+    );
+
+    // The cache version, the bindings' exports, and the start function — each
+    // asserted as a line that actually greps `dist/`, not as the word appearing
+    // somewhere in the file. `__VERSION__` is named in this workflow's own prose
+    // more than once, so an assertion that merely looks for the word passes with
+    // the check deleted.
+    for (needle, why) in [
+        (
+            "__VERSION__",
+            "an unsubstituted placeholder ships a worker that never invalidates",
+        ),
+        (
+            "export",
+            "the page loads app.js with a dynamic import, so a truncated one fails only \
+                    in a browser",
+        ),
+        (
+            "__wbindgen_start",
+            "without it the bindings load and the app never runs, silently",
+        ),
+    ] {
+        // The check greps a quoted needle: `grep -q '__VERSION__' dist/…`, matching the
+        // three greps the workflow actually uses. Quoting is what keeps the
+        // pattern from being read as a shell redirection or glob.
+        assert!(
+            live.lines().any(|line| {
+                line.contains(&format!("grep -q '{needle}'")) && line.contains("dist/")
+            }),
+            "pages.yml must run a `grep -q '{needle}'` against dist/ ({why}); the word merely \
+             appearing in the file is not the check",
+        );
+    }
+    // The install icons must be checked as PNGs, not just named — a file with
+    // the right name and no raster installs with a broken icon.
+    assert!(
+        live.lines().any(|line| line.contains("89504e470d0a1a0a")),
+        "pages.yml must check the PNG magic number; a dist/icon-*.png that is not a PNG has the \
+         right name and no image",
+    );
+    // The page must call the initializer, which is the one failure with no
+    // error message anywhere.
+    assert!(
+        live.lines()
+            .any(|line| line.contains("grep -q 'm.default()'") && line.contains("dist/index.html")),
+        "pages.yml must check that dist/index.html calls m.default(); without it the bindings \
+         load and the app never run, silently",
+    );
+    // And the Python must be a quoted heredoc, not `python3 -c`: an indented
+    // `-c` body is quoted by the shell before Python sees it, and a single quote
+    // in it ends the string early — a parse error pointing at nothing wrong.
+    assert!(
+        live.contains("<<'PY'"),
+        "pages.yml's multi-line Python must be a <<'PY' heredoc, not python3 -c; an indented -c \
+         body breaks on shell quoting, not on Python",
+    );
+    assert!(
+        !live.contains("python3 -c"),
+        "pages.yml must not use python3 -c for the site check's Python",
+    );
+}
+
+/// The workflow must build the site itself, in the documented order, because
+/// nothing committed can.
+///
+/// `dist/app.js` and `dist/app_bg.wasm` exist nowhere else in the tree — they
+/// are written by `wasm-bindgen` and are gitignored. A workflow that checked out
+/// the repository and uploaded `dist/` would publish a site that loads and never
+/// starts, from committed files alone. So the build steps have to be here, in
+/// order, and the `touch` has to survive: `build.rs` writes into the source tree
+/// rather than `OUT_DIR`, so Cargo cannot see its own output changed and skips
+/// the second build, leaving `dist/` with the two wasm artefacts and none of the
+/// six shell files.
+#[test]
+fn the_workflow_builds_the_site_rather_than_publishing_committed_files() {
+    let Some(pages) = live_pages_workflow() else {
+        return;
+    };
+    for needle in [
+        "cargo build --locked --lib --target wasm32-unknown-unknown --release",
+        "wasm-bindgen --target web --no-typescript --out-dir dist --out-name app",
+        "touch build.rs",
+        "cargo build --release --locked",
+    ] {
+        assert!(
+            pages.contains(needle),
+            "pages.yml must run `{needle}`; the site's wasm artefacts exist nowhere else",
+        );
+    }
+    // The wasm artefact's name follows the crate, and a renamed crate that
+    // forgets this gets an empty bindings directory and a green job.
+    let manifest = std::fs::read_to_string(root().join("Cargo.toml")).expect("Cargo.toml");
+    let crate_name = manifest
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("name = "))
+        .map(|rest| rest.trim().trim_matches('"').to_owned())
+        .expect("Cargo.toml names the package");
+    assert!(
+        pages.contains(&format!(
+            "target/wasm32-unknown-unknown/release/{crate_name}.wasm"
+        )),
+        "pages.yml must bind the crate's own wasm ({crate_name}.wasm); a renamed crate that \
+         misses this publishes bindings for no crate at all",
+    );
+}
+
+/// The Pages workflow must stay separate from the build.
+///
+/// `build.yml` runs on every pull request, including from forks. A deploy needs
+/// `pages: write`, `id-token: write` and the `github-pages` environment, none of
+/// which a fork PR has — so folding the deploy into `build.yml` would make the
+/// CI build unrunnable by anyone who can push a branch, and would put the power
+/// to overwrite the live site on every ref. Two files, one power.
+#[test]
+fn the_deploy_lives_in_its_own_workflow() {
+    let (Some(build), Some(pages)) = (workflow("build.yml"), workflow("pages.yml")) else {
+        return;
+    };
+    for (name, text) in [("build.yml", &build), ("pages.yml", &pages)] {
+        let live = strip_yaml_comments(text);
+        // A `uses:` step is written `- uses: actions/deploy-pages@…` on one line, with
+        // whatever indent and list marker the surrounding block happens to use.
+        // Match the action reference itself, not an exact line prefix, so a step
+        // nested differently still registers: the invariant is "this workflow
+        // runs deploy-pages", and reading the line literally would have let a
+        // folded-in deploy job pass unnoticed.
+        let runs = |action: &str| {
+            live.lines()
+                .filter_map(|line| line.trim().strip_prefix("- "))
+                .chain(live.lines().map(str::trim))
+                .any(|line| {
+                    line.strip_prefix("uses: ")
+                        .is_some_and(|rest| rest.starts_with(action))
+                })
+        };
+        let deploys = runs("actions/deploy-pages@");
+        let expected = name == "pages.yml";
+        assert_eq!(
+            deploys,
+            expected,
+            "{name} must {} the deploy step; the Pages deploy is a separate workflow so the CI \
+             build stays runnable from a fork PR, where pages: write and the github-pages \
+             environment do not exist",
+            if expected { "carry" } else { "not carry" },
+        );
+    }
+    assert!(
+        !build.contains("upload-pages-artifact"),
+        "build.yml must not upload a Pages artifact; it uploads a plain run artifact, and the \
+         Pages deploy has its own build",
+    );
+    // The deploy must live behind the *Pages* environment, so a reviewer-gated
+    // environment can hold the live site back. Read the two lines as a block,
+    // not as two independent `contains`: `name: github-pages` also appears as
+    // the artifact's name and as the `artifact_name`, so searching the whole
+    // file for it would stay true after the environment was renamed — and the
+    // rename is exactly the mutation that quietly removes the gate.
+    let env_gate = pages.lines().any(|line| line.trim() == "environment:")
+        && pages
+            .lines()
+            .any(|line| line.trim() == "name: github-pages");
+    assert!(
+        env_gate,
+        "the deploy job must set `environment:` with `name: github-pages`, so the repository's \
+         Pages approval rules can gate the live site",
+    );
+    // And the two must be adjacent: an `environment:` with no name, or a name
+    // belonging to something else, is not the gate.
+    let gated = pages
+        .lines()
+        .collect::<Vec<_>>()
+        .windows(2)
+        .any(|pair| pair[0].trim() == "environment:" && pair[1].trim() == "name: github-pages");
+    assert!(
+        gated,
+        "the deploy job's `environment:` must be followed by `name: github-pages`; a renamed \
+         or nameless environment is not the repository's Pages gate",
+    );
+}
+
+/// A workflow must not depend on an action whose SHA is unpinned.
+///
+/// Every `uses:` in this file is a 40-character commit SHA with the version in a
+/// trailing comment. A tag or a branch is mutable: whoever can move the tag
+/// runs code with this repository's credentials — and the deploy job's token can
+/// write to Pages. This is the one supply-chain property that is cheap to assert
+/// and impossible to notice when it lapses.
+#[test]
+fn every_action_is_pinned_to_a_commit_sha() {
+    for name in ["build.yml", "pages.yml"] {
+        let Some(text) = workflow(name) else {
+            continue;
+        };
+        let live = strip_yaml_comments(&text);
+        for line in live.lines() {
+            let Some(rest) = line.trim().strip_prefix("uses:") else {
+                continue;
+            };
+            let reference = rest.trim();
+            let Some((_, sha)) = reference.rsplit_once('@') else {
+                panic!("{name}: `uses: {reference}` names no ref; every action must be pinned");
+            };
+            assert!(
+                sha.len() == 40 && sha.chars().all(|c| c.is_ascii_hexdigit()),
+                "{name}: `uses: {reference}` is not pinned to a 40-character commit SHA; a tag \
+                 or branch is mutable and runs code with this repository's credentials",
+            );
+        }
+    }
+}
+
+/// `top_level_env` must see the block it claims to, and only that block.
+///
+/// Every workflow test that asks "is this set for the whole workflow?" reads
+/// through this helper, so a helper that quietly returns an empty map would make
+/// them all skip — and a skipped test reads the same as a passing one in the
+/// summary. It is therefore exercised against a synthetic document with
+/// hand-written expectations, including the two ways it can go wrong: stopping
+/// at the wrong place, and running on past the end of the block into a key that
+/// belongs to the next section.
+#[test]
+fn the_env_reader_reads_the_block_and_stops_at_the_next_section() {
+    let env = top_level_env(
+        "\
+env:
+  CARGO_TERM_COLOR: always
+  WASM_BINDGEN_VERSION: 0.2.128
+
+permissions:
+  contents: read
+",
+    )
+    .expect("the document has an env: block");
+    assert_eq!(
+        env.get("CARGO_TERM_COLOR").map(String::as_str),
+        Some("always"),
+    );
+    assert_eq!(
+        env.get("WASM_BINDGEN_VERSION").map(String::as_str),
+        Some("0.2.128"),
+    );
+    // The block ended at `permissions:`; this key is indented the same way and
+    // would be swallowed by a reader that kept going.
+    assert!(
+        !env.contains_key("contents"),
+        "the reader ran past the end of env: into permissions:",
+    );
+
+    // A document with no `env:` at all is `None`, not an empty map — the
+    // difference between "the block is empty" and "there is no block", which is
+    // the failure the tests that use this need to name.
+    assert!(
+        top_level_env("name: pages\non:\n  push:\n").is_none(),
+        "a document with no env: must read as None, not as an empty block",
+    );
+    // An indented `env:` is not a top-level block.
+    assert!(
+        top_level_env("jobs:\n  env:\n    CARGO_TERM_COLOR: always\n").is_none(),
+        "an env: nested under jobs: is not the workflow's env:",
     );
 }
 

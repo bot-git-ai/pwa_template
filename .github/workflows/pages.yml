@@ -1,35 +1,53 @@
 # Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
 # AGPL License
-
-name: build
-
-# Two builds, in order, because there are two targets. The order is not a
-# convenience: `build.rs` derives the service worker's cache version from the
-# bytes of every other file in `dist/`, and the wasm is one of them. Building the
-# host side first would pin the cache to whatever the previous build left behind,
-# and the job would publish an app whose cache never invalidates. So this runs
-# exactly what AGENTS.md and INSTRUCTIONS.md document, in the order they
-# document it.
 #
-# What the job is for: the wasm, the bindings and the whole site are build output
-# and are never committed, so nothing in the repository proves they still build,
-# or that the two steps still agree. That is the gap this closes -- it runs both
-# steps from a clean checkout and then inspects the `dist/` they produced, rather
-# than trusting a green job. Nothing is published here; `dist/` is left as a
-# workflow artifact.
+# Publish the site to GitHub Pages, from a build of its own.
+#
+# Why this is a separate workflow rather than extra steps in `build.yml`:
+# Pages deploys need `pages: write` and `id-token: write` and an environment,
+# and `build.yml` runs on every pull request, including from a fork, where
+# neither the permission nor the environment exists. Splitting them keeps the
+# build honest -- it stays runnable by anyone who can push a branch, with
+# read-only permissions, and the thing that can overwrite the live site exists
+# on exactly one ref.
+#
+# What it does NOT do is deploy from every push anywhere: `on:` is `branches:
+# [master]`, and the `deploy` job repeats that test for itself. A feature branch
+# therefore builds the whole site and still cannot publish.
+#
+# `build.yml` already runs the two build steps in the order AGENTS.md requires
+# and inspects the result. This workflow reuses nothing from it and builds
+# again rather than passing the artifact across: `upload-artifact` does not
+# preserve the empty directories a site may want, and the Pages artifact is a
+# tarball anyway. Two builds of a one-crate site is cheaper than debugging a
+# live site that is missing its app.
+#
+# A copy-and-rename template inherits this file verbatim, so anything an app
+# adds to its own `src/` must be checked here too. The site check below is the
+# only automated coverage of the built site (no test can assert on `dist/`,
+# which is gitignored) -- if you add a file the page links or the worker
+# precaches, add it to that check and to `build.yml`'s, or it ships unchecked.
+
+name: pages
+
+# `concurrency` is not a preference here. Pages holds a single deployment slot
+# per site, and two deploys racing each other can interleave so that the older
+# one is published last -- a live site a version behind master, with both jobs
+# green. Cancelling the in-flight run instead means a newer commit always wins
+# the slot.
+concurrency:
+  group: pages
+  cancel-in-progress: false
 
 on:
+  # Every commit that lands on master is deployed, and nothing else. A push to
+  # any other branch builds but does not publish, so a feature branch is
+  # reviewable without moving the live site.
+  #
+  # Not tags: a tagged commit that never reached master must not become the
+  # live site.
   push:
     branches: [master]
-  pull_request:
-  workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -37,7 +55,35 @@ env:
   # mismatched generator emits bindings the runtime will not load, and the page
   # fails to start with "The app could not start" -- a failure that looks like an
   # app bug and is not one.
+  #
+  # `version="$WASM_BINDGEN_VERSION"` below expands to nothing if this line is
+  # missing, and every other check then passes with no generator installed at
+  # all. That is why a test asserts the declaration, not just the use.
   WASM_BINDGEN_VERSION: 0.2.128
+  # NO RUSTFLAGS HERE, DELIBERATELY. `web_sys_unstable_apis` is for apps that
+  # use web-sys's unstable surface -- the Screen Wake Lock API, say, which is
+  # gated on it in web-sys 0.3.105 and whose `WakeLockSentinel` type is not
+  # reachable without it even with the cargo features enabled. This template
+  # uses no unstable API, and a clean wasm build with no `RUSTFLAGS` and no
+  # `.cargo/config.toml` was verified to finish here (2026-10-02).
+  #
+  # So setting it is not merely redundant; it is wrong. Several web-sys getters
+  # are typed differently behind that cfg -- `MouseEvent::client_x` is `i32`
+  # normally and `f64` with it, and `PointerEvent` inherits the type -- so a
+  # workflow carrying a cfg the crate is not built with lints a *different*
+  # web-sys than the one that ships. A green host clippy cannot catch it, since
+  # the host build compiles no web-sys code at all; only the wasm clippy run
+  # below sees it, and it sees whatever this file sets.
+  #
+  # An app that adds an unstable API must set it HERE, in the top-level `env:`,
+  # for both the build and the wasm clippy -- not on one step. See the
+  # `github-pages-deploy-for-a-rust-pwa` and `rust-pwa-unstable-web-sys-cfg`
+  # notes for why `.cargo/config.toml` is the better place for it, and why
+  # `build.rs` emitting `cargo:rustc-cfg` does not reach the registry dependency
+  # that gates the API.
+
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -51,9 +97,10 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # stable
         with:
-          # The app's target, and the only one the job needs. `dtolnay/rust-toolchain`
-          # takes the channel from `toolchain:`; `targets:` adds to it, so the two
-          # lines together are "stable, plus wasm32".
+          # The site's target, and the only one the job needs.
+          # `dtolnay/rust-toolchain` takes the channel from `toolchain:`;
+          # `targets:` adds to it, so the two lines together are "stable, plus
+          # wasm32".
           toolchain: stable
           targets: wasm32-unknown-unknown
 
@@ -131,10 +178,11 @@ jobs:
       - name: Generate the web bindings
         run: |
           set -eu
-          # Writes dist/app.js and dist/app_bg.wasm -- the app itself. They exist
-          # nowhere else in the tree, and nothing committed would notice them
-          # going stale. `--out-name app` is fixed across the whole family of
-          # apps so the shell test is literally the same file in each repo.
+          # Writes dist/app.js and dist/app_bg.wasm -- the app itself. They
+          # exist nowhere else in the tree, and nothing committed would notice
+          # them going stale. `--out-name app` is fixed across the whole family
+          # of apps so the shell test is literally the same file in each repo,
+          # and so a renamed crate only has to change the input path below.
           wasm-bindgen --target web --no-typescript --out-dir dist --out-name app \
             target/wasm32-unknown-unknown/release/pwa_template.wasm
 
@@ -145,7 +193,8 @@ jobs:
           # worker, both install icons, the manifest -- and derives the worker's
           # cache version from the bytes of all of them. It must run after the
           # bindings step: the version is hashed from what the previous step
-          # wrote.
+          # wrote, so running this first pins it to whatever the previous build
+          # left behind -- a worker whose cache never invalidates.
           #
           # The touch is not redundant. `build.rs` writes into the source tree,
           # not into OUT_DIR, so Cargo cannot tell that anything changed and will
@@ -154,7 +203,7 @@ jobs:
           # would be a no-op and copy nothing -- leaving `dist/` with the two wasm
           # artefacts and none of the six shell files, which is the exact
           # half-built site this shape has hit before. A fresh CI runner has
-          # nothing to compile at all and reproduces it every time, so this step
+          # nothing compiled at all and reproduces it every time, so this step
           # would be red on its first commit.
           touch build.rs
           cargo build --release --locked
@@ -167,23 +216,19 @@ jobs:
           # therefore the only thing that ever checks it -- so this checks it,
           # rather than trusting a green job to mean the site is whole.
           #
-          # A green build that produced four of the eight files is exactly the
+          # A green build that produced seven of these eight files is exactly the
           # failure this shape has already had: `write_tree` once swapped the
           # whole directory and took the wasm with it, leaving a
           # publishable-looking site with no app in it. Verify the file list, not
           # the exit status.
-          # Every one of the eight files, by name. Naming them is the point: the
-          # failure this check exists for is a `dist/` that looks publishable and
-          # is missing something the page or the worker references -- a file
-          # that is referenced but never written does not show up as a count.
           #
           # The Python below is a `<<'PY'` heredoc, not `python3 -c`, and it must
-          # stay one. An indented `python3 -c "…"` body is quoted by the shell
+          # stay one. An indented `python3 -c "..."` body is quoted by the shell
           # before Python ever sees it, so a single quote in the body ends the
           # string early and the failure is a shell parse error pointing at
           # nothing that looks wrong. Three sibling workflows had exactly that.
           # The quoted delimiter also stops the shell expanding `$` inside the
-          # body, which a JSON or shell check here would otherwise mangle.
+          # body.
           expected="app.js app_bg.wasm icon.svg icon-192.png icon-512.png index.html manifest.webmanifest service-worker.js"
           missing=""
           for file in $expected; do
@@ -216,25 +261,35 @@ jobs:
           # long after the build looked fine.
           grep -q 'export' dist/app.js \
             || { echo "::error::dist/app.js carries no exports; the page's dynamic import would fail"; exit 1; }
-          # The install icons are derived from the committed SVG, the SVG is
-          # published beside them, and the manifest has to agree with what was
-          # actually rasterized -- which is the whole reason `build.rs`
-          # assembles the manifest rather than copying a file.
+          # And they must carry the start function the page's `m.default()`
+          # call runs. Without it the module loads and the app never starts,
+          # which is a failure with no error message anywhere.
+          grep -q '__wbindgen_start' dist/app.js \
+            || { echo "::error::dist/app.js has no start function; the app would load and never run"; exit 1; }
+          # The icons must be real PNGs at the sizes the manifest declares, not
+          # the SVG copied under a .png name: a file with the right name and no
+          # raster in it installs with a broken icon.
+          for size in 192 512; do
+            test "$(head -c 8 "dist/icon-${size}.png" | od -An -tx1 | tr -d ' \n')" = "89504e470d0a1a0a" \
+              || { echo "::error::dist/icon-${size}.png is not a PNG"; exit 1; }
+          done
+          # The page must call the initializer. This is a one-line check for a
+          # failure that is otherwise completely silent -- see tests/shell.rs.
+          grep -q 'm.default()' dist/index.html \
+            || { echo "::error::dist/index.html does not initialise the bindings; the app would never start"; exit 1; }
           python3 - <<'PY'
           import hashlib, json
           # The published SVG must be the committed icon, byte for byte. The
           # page links it and the worker precaches it, so a drift here is both
           # a wrong favicon and an install that fails.
           #
-          # The digest below is the author's original and must equal
-          # ICON_SHA256 in tests/shell.rs -- the same value in two places,
-          # asserted equal by `both_workflows_pin_the_icon_the_repository_still_has`.
-          # It was NOT updated when the icon changed on 2026-10-01 (the `P` glyph
-          # gave way to three bars in a mid grey), because that commit touched
-          # assets/, src/ and tests/ and not .github/. This workflow therefore sat
-          # red from that commit until 2026-10-02, when adding `pages.yml` forced
-          # the check to be run for real. The test named above exists so the two
-          # copies cannot diverge again -- including the copy in `pages.yml`.
+          # The digest is the author's original, and it is deliberately changed
+          # when the icon is: on 2026-10-01 the `P` glyph gave way to three bars
+          # in a mid grey. It must equal ICON_SHA256 in tests/shell.rs -- the
+          # same value in two places, asserted equal by
+          # `both_workflows_pin_the_icon_the_repository_still_has`. When you
+          # change the icon, change it in this workflow, in that workflow, and in
+          # that constant, or one of the two goes red and says so.
           with open("assets/icon.svg", "rb") as handle:
               source = handle.read()
           with open("dist/icon.svg", "rb") as handle:
@@ -245,6 +300,9 @@ jobs:
           ), "assets/icon.svg is no longer the author's original"
           print("  ok   dist/icon.svg is the committed icon")
 
+          # The manifest's icon list must be what was actually rasterized, not a
+          # hand-kept copy of the source: that is the whole reason `build.rs`
+          # assembles the manifest.
           with open("dist/manifest.webmanifest", encoding="utf-8") as handle:
               manifest = json.load(handle)
           assert manifest["icons"] == [
@@ -267,37 +325,65 @@ jobs:
           # only for the target being compiled, so a clean host build says
           # nothing about the wasm one.
           #
-          # The wasm leg must be built with the same cfg the crate is built
-          # with. `web-sys` exposes an unstable form of several accessors under
-          # `--cfg=web_sys_unstable_apis`, and the two forms can differ in
-          # *type* -- `MouseEvent::client_x` is `i32` on the stable path and
-          # `f64` on the unstable one, and `PointerEvent` inherits it. Code that
-          # only type-checks under one of them fails to compile under the other,
-          # in opposite directions, so a leg missing the cfg is not a weaker
-          # check: it lints a different program from the one that ships.
-          #
-          # This crate uses no unstable APIs, so there is no `RUSTFLAGS` in
-          # this file's `env:` above and the two forms are equivalent here --
-          # verified 2026-10-02 by a clean wasm build with no cfg of any kind.
-          # That is the correct state, not an omission: adding the cfg to a repo
-          # that does not need it is what lints the *different* program, and it
-          # is what copying `chess_clock`'s workflow into a repo that does not
-          # use the Screen Wake Lock would do. An earlier version of this
-          # comment said an app that uses unstable APIs "must export the cfg for
-          # this step, the way `chwazi` does". That was false on two counts:
-          # `chwazi` uses no unstable API either, and it deliberately sets no
-          # `RUSTFLAGS`, with a long note in its own build.yml saying why. The
-          # instruction that survives is the last one -- lint both targets with
-          # the cfg the crate is actually built with, whatever that is.
+          # With no `RUSTFLAGS` in `env`, this lints the same web-sys the build
+          # above used. See the note at the top of this file for why that has to
+          # be true and not merely tidy.
           cargo clippy --locked --all-targets -- -D warnings
           cargo clippy --locked --lib --target wasm32-unknown-unknown -- -D warnings
 
-      - name: Upload the built site
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          name: dist-${{ github.sha }}
+          # `upload-pages-artifact` is not `upload-artifact`. The Pages
+          # artifact is a single tarball the deploy action then finds *by
+          # name*, and a plain upload into the run's artifacts produces a green
+          # build followed by a deploy that cannot find what it was given.
+          # `github-pages` is this action's default name and is stated here so
+          # the deploy step's `artifact_name` has something to match.
+          name: github-pages
           path: dist/
-          if-no-files-found: error
-          # No CDN: the site is small, and a copy that cannot be evicted is a
-          # copy that will still be downloadable after a bad build.
-          retention-days: 7
+
+  deploy:
+    name: Deploy to GitHub Pages
+    # Only a build for master publishes. The trigger already says `branches:
+    # [master]`, so this is belt and braces -- but the trigger is one line above
+    # the job and this is the line that decides whether the live site is
+    # overwritten. Being explicit here means a trigger widened later does not
+    # silently hand every branch a publish button.
+    if: github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+
+    # The environment is what makes the deploy respect the repository's Pages
+    # approval rules, so a protected branch or a reviewer-gated environment can
+    # still hold the live site back. Without it the job would publish straight
+    # from the workflow definition.
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    # The only job holding these. Both permissions can overwrite the live site,
+    # and the token behind them is minted for the repository however the workflow
+    # was reached -- so they are scoped here rather than granted workflow-wide,
+    # where a build step or a third-party action added later could spend them.
+    permissions:
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+        with:
+          # By *name*, not by id. `deploy-pages` v5 has no `artifact_id` input --
+          # it warns `Unexpected input(s) 'artifact_id'` and falls back to this
+          # same default -- so passing one is at best ignored and at worst names
+          # an artifact that does not exist.
+          #
+          # The name is stated rather than left to the default so the two sides
+          # are visibly the same string. `upload-pages-artifact` defaults to
+          # `github-pages` and so does this input; a mismatch between them
+          # produces a deploy that finds no artifact, and naming it on both sides
+          # makes that mismatch a diff rather than a `HttpError: Not Found` at
+          # run time that names nothing useful.
+          artifact_name: github-pages
