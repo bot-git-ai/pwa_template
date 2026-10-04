@@ -4,8 +4,8 @@
 //! Write the site to `dist/` while the crate compiles.
 //!
 //! The app is a static site, so publishing it is a file copy plus three small
-//! derivations, not a program run. `dist/` is the whole product and the only
-//! copy. Eight files, from two builds:
+//! derivations. `dist/` is the whole product and the only copy: eight files,
+//! from two builds.
 //!
 //! | `dist/` file      | written by |
 //! |-------------------|------------|
@@ -21,7 +21,7 @@
 //!
 //! The SVG is published as well as rasterized, and that is not optional: the
 //! page links it as the favicon and the worker precaches it, and a URL that
-//! 404s does not merely fail one request -- `caches.addAll` rejects the whole
+//! 404s does not merely fail one request — `caches.addAll` rejects the whole
 //! install if any listed URL is missing, so an un-published icon leaves the app
 //! with no service worker and no offline support at all, presenting as a
 //! mysterious caching bug rather than as a missing file.
@@ -29,9 +29,9 @@
 //! **Order matters.** The cache version is derived from the bytes of every
 //! other shell file, including the wasm, so this script must run *after*
 //! `wasm-bindgen`. Run it first and it pins a version to whatever the previous
-//! build left behind — a service worker that never invalidates, shipping an
-//! app that is older than its own cache name. That is why AGENTS.md and the
-//! workflow both run the wasm step first, and why the wasm step ends with
+//! build left behind — a service worker that never invalidates, shipping an app
+//! older than its own cache name. That is why AGENTS.md and the workflow both
+//! run the wasm step first, and why that step ends with
 //! `touch build.rs && cargo build --release`: this script writes into the
 //! source tree rather than `OUT_DIR`, so cargo cannot see that its output
 //! changed and would otherwise skip the second, otherwise identical build.
@@ -42,9 +42,9 @@
 //!   against real files, so watching `dist/index.html` watches a file that
 //!   never changes and the script then never re-runs.
 //! * It writes each file under a scratch name and renames it over its target,
-//!   so a host serving `dist/` never serves a half-written file. And it
-//!   writes *in place* rather than replacing the directory, because the two
-//!   wasm artefacts live there and are not ours to delete.
+//!   so a host serving `dist/` never serves a half-written file. And it writes
+//!   *in place* rather than replacing the directory, because the two wasm
+//!   artefacts live there and are not ours to delete.
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -62,13 +62,13 @@ use std::path::{Path, PathBuf};
 /// screen, which is shown for a moment and cannot be scheme-aware, so it is the
 /// one surface where a fixed value costs nothing and a light one flashes.
 ///
-/// `theme_color` is deliberately **absent**, and that is not an oversight.
-/// Chrome for Android prefers a manifest `theme_color` over the per-scheme
-/// `<meta name="theme-color" media=...>` tags the shell declares, and a
-/// manifest cannot express a scheme variant — so putting one here would pin the
-/// installed app's status bar dark even on a device in light mode, and
-/// silently override both meta tags. Omitting it lets the media-scoped tags win,
-/// which is the only way the status bar can follow the system.
+/// `theme_color` is deliberately **absent**. Chrome for Android prefers a
+/// manifest `theme_color` over the per-scheme `<meta name="theme-color"
+/// media=...>` tags the shell declares, and a manifest cannot express a scheme
+/// variant — so putting one here would pin the installed app's status bar dark
+/// even on a device in light mode, and silently override both meta tags.
+/// Omitting it lets the media-scoped tags win, which is the only way the status
+/// bar can follow the system.
 const MANIFEST: Manifest = Manifest {
     name: "Simple PWA",
     short_name: "PWA",
@@ -126,16 +126,14 @@ fn main() {
         built.push(((*name).to_owned(), bytes));
     }
 
-    // The icon is rasterized here, at every size the manifest declares, and
-    // the manifest is assembled from that same list. One source of truth:
-    // `assets/icon.svg` is the icon, and the PNGs are what it looks like at
-    // 192 and 512. The PNGs are build output and are never committed.
+    // The icon is rasterized at every size the manifest declares, and the
+    // manifest is assembled from that same list: `assets/icon.svg` is the icon,
+    // the PNGs are what it looks like at 192 and 512, and both are build output.
     let svg =
         std::fs::read(root.join(ICON)).unwrap_or_else(|error| panic!("reading {ICON}: {error}"));
-    // Publish the SVG itself, not only what it rasterizes to. The page links it
-    // as the favicon and the worker precaches it; `caches.addAll` rejects the
-    // entire install when any listed URL 404s, so a missing icon is not a
-    // missing icon.
+    // Publish the SVG itself, not only what it rasterizes to: the page links it
+    // as the favicon and the worker precaches it, and `caches.addAll` rejects
+    // the entire install when any listed URL 404s.
     built.push((ICON_OUT.to_owned(), svg.clone()));
     let mut icons = Vec::new();
     for size in ICON_SIZES {
@@ -180,14 +178,13 @@ fn rasterize(svg: &[u8], size: u32) -> Vec<u8> {
     );
 
     // 512 is a power of two, so the pixmap request can only fail if the
-    // allocation fails. `Pixmap::new` returns an `Option`, not a `Result`.
+    // allocation fails; `Pixmap::new` returns an `Option`, not a `Result`.
     let mut pixmap = match tiny_skia::Pixmap::new(size, size) {
         Some(pixmap) => pixmap,
         None => panic!("a {size}x{size} pixmap could not be allocated"),
     };
-    // `size` is a `u32` and the transform is `f32`, so the division is `f32`;
-    // dividing in `f64` and casting afterwards is the mistake to avoid here.
-    // `Size::width()` is already `f32`, so it needs no cast.
+    // `size` is a `u32` and the transform is `f32`, so this divides in `f32`;
+    // dividing in `f64` and casting afterwards is the mistake to avoid.
     let scale = size as f32 / tree.size().width();
     resvg::render(
         &tree,

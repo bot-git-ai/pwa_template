@@ -3,16 +3,15 @@
 
 //! The browser layer: the only file that talks to the DOM.
 //!
-//! It is deliberately thin and deliberately dumb. Every decision — what the
-//! count becomes, when it stops, what the readout says, what is worth
-//! storing — was made in [`crate::counter`] and is unit tested there. What is
-//! left here is `get_element_by_id`, `set_text_content`, `add_event_listener`,
-//! and nothing that could have been written down as a rule.
+//! Every decision — what the count becomes, when it stops, what the readout
+//! says, what is worth storing — was made in [`crate::counter`] and is unit
+//! tested there. What is left here is `get_element_by_id`, `set_text_content`,
+//! `add_event_listener`, and nothing that could have been written down as a
+//! rule.
 //!
-//! The entry point is `#[wasm_bindgen(start)]`, so the six-line loader in
-//! `ui.html` needs no argument list, no callback name and no glue: importing
-//! the module runs the app. That is what "no handwritten JavaScript" means in
-//! practice.
+//! The entry point is `#[wasm_bindgen(start)]`, so the loader in `ui.html`
+//! needs no argument list, no callback name and no glue: importing the module
+//! runs the app.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -119,10 +118,8 @@ fn render(document: &Document, state: &State) {
     // greyed-out class it is what a screen reader and a keyboard both see.
     //
     // No `aria-label`: the button's visible text is already its accessible
-    // name, and a second one describing the same control differently — a
-    // sighted user reading "Add one", a screen reader user told "Add one tap.
-    // Currently nothing yet" — is the defect, not the fix. `disabled` alone
-    // conveys the ceiling.
+    // name, and a second one describing the same control differently is the
+    // defect, not the fix.
     if let Some(button) = button(document, "hello-button") {
         button.set_disabled(counter.is_full());
     }
@@ -162,37 +159,31 @@ fn bind(window: &Window, document: &Document, state: &State) {
         warn("could not bind the button", error);
         return;
     }
-    // The closure must outlive this function or the listener becomes a dangling
-    // function pointer; `forget` is the correct owner for a listener that lives
-    // as long as the page does.
+    // `forget` is the correct owner here: the closure must outlive `bind` or the
+    // listener becomes a dangling function pointer.
     closure.forget();
 }
 
 /// Register the service worker, and release any stale registration.
 ///
-/// Deliberately silent. This used to report the outcome on the page, and the
-/// page carried a line saying the app was ready for offline use — which is a
-/// thing the reader never asked to be told, on a line that existed only to hold
-/// it. The worker is a background concern: it either works, and the user
-/// notices nothing, or it does not, and the app still runs.
+/// Deliberately silent. This used to report the outcome on the page, on a line
+/// that existed only to hold it — and that line only ever reported good news
+/// the reader did not ask about. The worker is a background concern: either it
+/// works and the user notices nothing, or it does not and the app still runs.
+/// Nothing is lost that the reader can act on.
 ///
-/// A registration failure is a console warning and nothing else. Nothing is
-/// lost that the reader can act on: the app works, online, exactly as before.
-///
-/// Called from an `async` start function, but it does not block the app: the
-/// registration is awaited, the page is interactive before it finishes, because
-/// offline support is not worth a blank screen.
+/// Registration is awaited, but not before the app is interactive: offline
+/// support is not worth a blank screen.
 async fn announce_offline(window: Window) {
     let container = window.navigator().service_worker();
 
-    // The scope is stated rather than inherited. Left to itself, a
-    // registration's scope is the directory of the page that registered it,
-    // which is right today and silently wrong the moment the app is published
-    // somewhere else, or opened through a path that resolves higher up the
-    // origin. A worker registered for the whole origin does not serve just its
-    // own pages -- it answers for every page on that origin, including the
-    // ones that have nothing to do with it. Naming the scope keeps that claim
-    // as small as the app.
+    // The scope is stated rather than inherited. Left to itself, a registration's
+    // scope is the directory of the page that registered it: right today, and
+    // silently wrong once the app is published somewhere else or opened
+    // through a path resolving higher up the origin. A worker registered for
+    // the whole origin answers for every page on it, including pages that have
+    // nothing to do with this app. Naming the scope keeps that claim as small
+    // as the app.
     let options = web_sys::RegistrationOptions::new();
     options.set_scope(SCOPE);
     if let Err(error) =
@@ -207,24 +198,17 @@ async fn announce_offline(window: Window) {
 
 /// Hand this app's own URLs back to the current worker.
 ///
-/// A service worker is a registration, and a registration outlives the page
-/// that made it: it is kept by the browser, not by the tab, and it keeps
-/// answering for its scope until something explicitly unregisters it. That is
-/// how a page on this origin can come to be served by a worker installed for a
-/// *different* page, long after the app that installed it was closed. A stale
-/// registration is not corrected by a reload, by a newer version of the app, or
-/// by a newer worker installing itself -- the newer worker only takes control
-/// where its own scope reaches, and a wider stale one is still in the way.
+/// A registration is kept by the browser, not the tab, so it outlives the page
+/// that made it and keeps answering for its scope until something explicitly
+/// unregisters it. That is how a page on this origin comes to be served by a
+/// worker installed for a *different* app, long after that app was closed — and
+/// a reload, a newer version or a newer worker installing itself cannot fix
+/// it, because the newer worker only takes control where its own scope reaches.
 ///
-/// So the repair is explicit: find any registration whose scope covers this
-/// app's directory but is not this app's directory, and unregister it. This
-/// app's own registration is left alone, and so is every other app on the
-/// origin -- each is scoped to its own directory, and a sibling that never
-/// covered us is not ours to remove.
-///
-/// Failures are ignored on purpose. This is best-effort cleanup of state this
-/// app did not create, and a browser that refuses leaves the user no worse
-/// off: the app still runs and still caches its own assets.
+/// So: unregister any registration whose scope covers this app's directory but
+/// is not this app's directory. Failures are ignored — this is best-effort
+/// cleanup of state this app did not create, and a browser that refuses leaves
+/// the user no worse off.
 async fn release_stale_registrations(window: &Window) {
     let container = window.navigator().service_worker();
     let Ok(registrations) = JsFuture::from(container.get_registrations()).await else {
@@ -256,12 +240,9 @@ async fn release_stale_registrations(window: &Window) {
         if ours.starts_with(&scope) {
             continue;
         }
-        // What is left is a scope that is a *strict* prefix of ours: a worker
-        // that would be consulted for this app's URLs while being registered
-        // for more than this app. A worker is consulted for a URL exactly when
-        // its scope is a prefix of that URL, which is the test above inverted.
-        //
-        // Of those, only our own worker qualifies: a different app's worker
+        // What is left is a scope that is a *strict* prefix of ours: a worker that
+        // would be consulted for this app's URLs while registered for more of
+        // the origin. Only our own worker qualifies — a different app's worker
         // lives in a different directory, so unregistering it would break the
         // app it belongs to.
         let script = registration
@@ -283,10 +264,10 @@ async fn release_stale_registrations(window: &Window) {
 /// more of the origin than this app's directory.
 ///
 /// A wider scope means the script sits at the root of this app's own directory
-/// rather than anywhere below it: a sibling app's worker is in a sibling
-/// directory and does not match. `strip_suffix`, not `trim_end_matches` — the
-/// latter strips a *set of characters*, so it would happily eat a directory
-/// named `...e-worker.js` and call it ours.
+/// rather than below it: a sibling app's worker is in a sibling directory and
+/// does not match. `strip_suffix`, not `trim_end_matches` — the latter strips a
+/// *set of characters*, so it would eat a directory named `...e-worker.js` and
+/// call it ours.
 fn script_belongs_to_app(script: &str, ours: &str) -> bool {
     match web_sys::Url::new(script) {
         Ok(url) => url.href().strip_suffix("service-worker.js") == Some(ours),
@@ -302,7 +283,7 @@ fn element(document: &Document, id: &str) -> Option<Element> {
     document.get_element_by_id(id)
 }
 
-/// The same, typed, so button methods are available without a cast.
+/// The typed form of [`element`], so button methods are available without a cast.
 fn button(document: &Document, id: &str) -> Option<HtmlButtonElement> {
     element(document, id)?.dyn_into().ok()
 }

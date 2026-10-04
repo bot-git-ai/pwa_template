@@ -3,16 +3,11 @@
 
 //! The app's actual logic: one counter and its rules.
 //!
-//! This module is the template's only real example of where logic belongs. It
-//! must stay free of `web-sys`, `js-sys` and `wasm-bindgen` so that it
-//! compiles and runs natively under `cargo test`. The browser layer in
-//! `crate::ui` owns every DOM call and nothing else; everything a person can
-//! reason about — what the count is, what it clamps to, what the button says,
-//! what gets stored, which storage key holds it — is decided here and unit
-//! tested here.
-//!
-//! When you copy this template, keep that split. The moment `counter.rs`
-//! reaches for `document`, its tests stop running and the app becomes a blob.
+//! No `web-sys`, no `js-sys`, no `wasm-bindgen`, so this module compiles and
+//! runs natively under `cargo test`. Keep it that way when you copy this
+//! template: the moment `counter.rs` reaches for `document`, its tests stop
+//! running and everything a person can reason about moves into `crate::ui`,
+//! where it can only be checked in a browser.
 
 /// Key prefix for every value this app writes to `localStorage`.
 ///
@@ -36,7 +31,6 @@ pub struct Counter {
 }
 
 impl Counter {
-    /// A counter starting at zero.
     #[must_use]
     pub const fn new() -> Self {
         Self { value: 0 }
@@ -130,7 +124,6 @@ pub struct Readout<'a> {
     pub next_action: &'a str,
 }
 
-/// Constrain a count to the range the app allows.
 fn clamp(value: i64) -> i64 {
     value.clamp(MIN, MAX)
 }

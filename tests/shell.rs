@@ -359,7 +359,7 @@ fn the_loader_does_nothing_but_load_and_report_failure() {
     );
     // It may declare locals in the failure branch, but it may not do anything
     // the app's logic could ever want: those would be state and events, which
-    // are Rust's job. No comment either -- a loader that explains itself is
+    // are Rust's job. No comment either — a loader that explains itself is
     // usually a loader that grew.
     for forbidden in [
         "//",
@@ -570,13 +570,14 @@ fn noscript_body(page: &str) -> String {
         .map_or(String::new(), |(body, _)| body.to_owned())
 }
 
-/// Everything a reader can actually see: HTML with comments, `<style>` bodies
-/// and `<script>` bodies removed.
+/// Everything a reader can actually see: `src/ui.html` with its `<!-- -->`
+/// comments removed.
 ///
-/// The `<noscript>` block is deliberately *kept*, even though it lives in a
-/// comment-like position — a browser with scripting off renders exactly that
-/// text, so it is user-visible text and is held to the same rule. What it must
-/// not do is name the implementation: it says what the user loses.
+/// Only HTML comments are dropped; the `<style>` and `<script>` bodies stay,
+/// because a `contains` assertion over this text has to be able to see them.
+/// The `<noscript>` block is kept for the same reason — a browser with scripting
+/// off renders exactly that text, so it is user-visible text and is held to the
+/// same rule: it says what the user loses, never what the app is built with.
 fn visible_text(page: &str) -> String {
     let mut out = String::with_capacity(page.len());
     let mut rest = page;
@@ -707,10 +708,7 @@ fn the_worker_never_answers_outside_its_own_directory() {
 #[test]
 fn the_page_states_the_scope_and_releases_a_wider_one() {
     let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
-    // Comments go first. The prose in `src/ui.rs` names these calls while
-    // explaining them, so an assertion over raw text can be satisfied by the
-    // explanation while the call it is about is gone: green, and proving
-    // nothing. A test about what the code does has to read the code.
+    // Comments go first — see `strip_rust_comments`.
     let ui = strip_rust_comments(&source);
     assert!(
         ui.contains("register_with_options"),
@@ -737,10 +735,7 @@ fn the_page_states_the_scope_and_releases_a_wider_one() {
 #[test]
 fn the_script_comparison_strips_a_suffix_rather_than_a_character_set() {
     let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
-    // Comments go first. The prose in `src/ui.rs` names these calls while
-    // explaining them, so an assertion over raw text can be satisfied by the
-    // explanation while the call it is about is gone: green, and proving
-    // nothing. A test about what the code does has to read the code.
+    // Comments go first — see `strip_rust_comments`.
     let ui = strip_rust_comments(&source);
     // The prose in this file names the method to explain why it is not used, so
     // the assertion is about code: a call, not the word.
@@ -771,10 +766,7 @@ fn the_script_comparison_strips_a_suffix_rather_than_a_character_set() {
 #[test]
 fn the_scope_is_a_relative_directory_shared_with_the_worker() {
     let source = std::fs::read_to_string(root().join("src/ui.rs")).expect("reading src/ui.rs");
-    // Comments go first. The prose in `src/ui.rs` names these calls while
-    // explaining them, so an assertion over raw text can be satisfied by the
-    // explanation while the call it is about is gone: green, and proving
-    // nothing. A test about what the code does has to read the code.
+    // Comments go first — see `strip_rust_comments`.
     let ui = strip_rust_comments(&source);
     assert!(
         ui.contains("const SCOPE: &str = \"./\";"),
@@ -793,7 +785,6 @@ fn the_scope_is_a_relative_directory_shared_with_the_worker() {
 ///
 /// The digest is the original template's, recorded so that an "improved" icon
 /// is a deliberate act with a visible diff rather than a silent one.
-/// The digest `assets/icon.svg` is recorded under.
 ///
 /// Deliberately changed once, on 2026-10-01: the file had carried the original
 /// template's `P` glyph in dark `#434343`, and three bars in a mid grey replaced
@@ -969,8 +960,8 @@ fn the_instructions_are_still_a_short_flat_list() {
             "INSTRUCTIONS.md no longer covers {required}"
         );
     }
-    // The tooling rules it replaces have to be rules too, or the reader is
-    // left with a hole where verification used to be.
+    // The tooling rules it replaces have to be rules too, or the reader is left
+    // with a hole where verification used to be.
     for required in [
         "cargo test",
         "clippy",
@@ -1025,11 +1016,8 @@ fn strip_yaml_comments(source: &str) -> String {
 
 /// `pages.yml` with its comments removed, or `None` if it is absent.
 ///
-/// Every workflow assertion reads this rather than the file: commenting a line
-/// out instead of deleting it is the mutation most likely to be applied to any
-/// of the settings below, and `# RUSTFLAGS:` satisfies a `contains` on the raw
-/// text while changing nothing about the job. That mistake was made and shipped
-/// once already, in this family.
+/// Every workflow assertion reads this rather than the file, for the reason
+/// `strip_yaml_comments` gives.
 fn live_pages_workflow() -> Option<String> {
     workflow("pages.yml").map(|text| strip_yaml_comments(&text))
 }
@@ -1038,12 +1026,9 @@ fn live_pages_workflow() -> Option<String> {
 ///
 /// Reading the block rather than searching the whole file is what lets a test
 /// ask "is this set at the *top level*", which is a question about indentation
-/// and cannot be answered by `contains`. A `RUSTFLAGS:` set on one step does
-/// not reach the other clippy run; a comment saying it does must not satisfy
-/// anything, so this reads `strip_yaml_comments` output.
-///
-/// The block ends at the first column-zero key — `permissions:` here — so a
-/// value belonging to some other top-level section cannot be mistaken for one.
+/// and cannot be answered by `contains`. The block ends at the first column-zero
+/// key — `permissions:` here — so a value belonging to some other top-level
+/// section cannot be mistaken for one.
 fn top_level_env(yaml: &str) -> Option<std::collections::BTreeMap<String, String>> {
     let mut declared = std::collections::BTreeMap::new();
     let mut in_env = false;
@@ -1217,8 +1202,8 @@ fn the_generator_is_installed_from_the_declared_variable() {
     );
     // And nowhere else: `asset="wasm-bindgen-${version}-…"` builds the download
     // name from the same variable, so exactly one `version="` may exist. Two
-    // means one of them is a literal, and the test above — which reads only the
-    // first — would pass on the variable while the install used the other.
+    // means one of them is a literal, and the assertion above — which reads only
+    // the first — would pass on the variable while the install used the other.
     assert_eq!(
         pages.matches("version=\"").count(),
         1,
@@ -1278,22 +1263,21 @@ fn only_master_can_reach_the_live_site() {
          runs for every trigger",
     );
 
-    // ... and it must ALSO be gated on not being a fork. This workflow is
-    // byte-identical in `wdomitrz/pwa_template` and in its fork
-    // `bot-git-ai/pwa_template` -- a fork exists precisely so its files can be
-    // copied -- so a gate that tests only the branch name cannot tell the two
-    // repositories apart: both have a `master`, and a push to the fork's master
-    // tries to publish a site it was never given. Two things go wrong, and the
-    // first is the one that happens: a fork has no Pages site of its own until
-    // someone enables one by hand, so every push to fork master dies at
-    // "Creating Pages deployment failed ... Ensure GitHub Pages has been
-    // enabled", after a green build and a full site check. And were Pages
-    // enabled there, the fork would serve its own divergent copy.
+    // And it must ALSO be gated on not being a fork. This workflow is
+    // byte-identical in `wdomitrz/pwa_template` and its fork
+    // `bot-git-ai/pwa_template` — a fork exists precisely so its files can be
+    // copied — and both have a `master`, so a gate that tests only the branch
+    // name cannot tell them apart: a push to the fork's master then tries to
+    // publish a site it was never given. Two things go wrong, and the first is
+    // the one that happens: a fork has no Pages site of its own until someone
+    // enables one by hand, so every push to fork master dies at "Ensure GitHub
+    // Pages has been enabled", after a green build and a full site check. And
+    // were Pages enabled there, the fork would serve its own divergent copy.
     //
     // `github.event.repository.fork` is the discriminator because it needs no
     // configuration: the event supplies it, false upstream and true in the fork.
     // The obvious alternative, a repository Actions variable, has the failure
-    // mode this assertion exists to prevent -- it would have to be set on the
+    // mode this assertion exists to prevent — it would have to be set on the
     // *user's* repository to publish, and no account but the user's can do that,
     // so the gate would ship as silently off on the one repository that owns
     // the site.
@@ -1301,7 +1285,7 @@ fn only_master_can_reach_the_live_site() {
     // Read the gate out of the comment-stripped workflow, never the raw one:
     // the comment block directly above this `if:` names both halves while
     // explaining them, so an assertion over raw text is satisfied by the prose
-    // with the clause deleted. That is not hypothetical -- it is how the
+    // with the clause deleted. That is not hypothetical — it is how the
     // `RUSTFLAGS` assertion in `chess_clock`'s equivalent file shipped.
     let live_gate = pages
         .split("\n  deploy:")
@@ -1318,7 +1302,7 @@ fn only_master_can_reach_the_live_site() {
          {live_gate:?}",
     );
     // And the fork rule must *extend* the master gate, not replace it. Two `if:`
-    // keys in one job is not an AND -- YAML keeps the last one -- so a gate that
+    // keys in one job is not an AND — YAML keeps the last one — so a gate that
     // keeps `github.ref` and adds `!fork` on a second line is the only correct
     // spelling, and dropping the master half would publish from every branch.
     assert!(
@@ -1556,9 +1540,9 @@ fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
             "without it the bindings load and the app never runs, silently",
         ),
     ] {
-        // The check greps a quoted needle: `grep -q '__VERSION__' dist/…`, matching the
-        // three greps the workflow actually uses. Quoting is what keeps the
-        // pattern from being read as a shell redirection or glob.
+        // The check greps a quoted needle, as `grep -q '__VERSION__' dist/…` does:
+        // quoting is what keeps the pattern from being read as a shell
+        // redirection or glob.
         assert!(
             live.lines().any(|line| {
                 line.contains(&format!("grep -q '{needle}'")) && line.contains("dist/")
@@ -1655,11 +1639,10 @@ fn the_deploy_lives_in_its_own_workflow() {
     for (name, text) in [("build.yml", &build), ("pages.yml", &pages)] {
         let live = strip_yaml_comments(text);
         // A `uses:` step is written `- uses: actions/deploy-pages@…` on one line, with
-        // whatever indent and list marker the surrounding block happens to use.
-        // Match the action reference itself, not an exact line prefix, so a step
-        // nested differently still registers: the invariant is "this workflow
-        // runs deploy-pages", and reading the line literally would have let a
-        // folded-in deploy job pass unnoticed.
+        // whatever indent and list marker the surrounding block uses. Match the
+        // action reference itself, not an exact line prefix, so a step nested
+        // differently still registers: the invariant is "this workflow runs
+        // deploy-pages".
         let runs = |action: &str| {
             live.lines()
                 .filter_map(|line| line.trim().strip_prefix("- "))
@@ -1897,8 +1880,10 @@ fn the_pinned_digest_function_is_correct() {
     );
 }
 
-/// Drop `//` line comments and `/* ... */` blocks, so an assertion about what
-/// the code *does* cannot be satisfied by a comment saying what it does.
+/// `source` with its `//` and `/* ... */` comments dropped.
+///
+/// Used so an assertion about what `src/ui.rs` *does* cannot be satisfied by a
+/// comment saying what it does.
 fn strip_rust_comments(source: &str) -> String {
     let mut out = String::with_capacity(source.len());
     let mut rest = source;

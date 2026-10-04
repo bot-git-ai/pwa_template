@@ -22,13 +22,13 @@
 <style>
 /* One palette, borrowed from the server this app is served beside, so a PWA
    opened from the same origin does not look like a different product. The names
-   are that project's tokens unchanged: a page that is restyled later reuses them
-   instead of inventing a second set of near-identical greys.
+   are that project's tokens unchanged: a page restyled later reuses them instead
+   of inventing a second set of near-identical greys.
 
-   Dark is the default and light is the override, which is the reverse of the
+   Dark is the default and light is the override, the reverse of the
    `color-scheme: light dark` convention. It is deliberate: `color-scheme` names
-   the scheme the page is *drawn* in, and a reader who has not chosen anything
-   gets the one this app was designed in. A reader who has chosen gets theirs. */
+   the scheme the page is *drawn* in, and a reader who has chosen nothing gets
+   the one this app was designed in. A reader who has chosen gets theirs. */
 :root {
   color-scheme: dark;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -155,26 +155,24 @@ button:disabled {
   <!-- The only element that changes when the app works. Rust owns its text from
        the first frame, so there is no "loading" state to flash: the number is
        real before the user can see it. `aria-live` makes every change announce
-       itself. The visible text is already the accessible name, so nothing here
-       needs a second one. -->
+       itself, and the visible text is already the accessible name. -->
   <p id="message" role="status" aria-live="polite">0 — nothing yet</p>
   <!-- The label says what the button does. It used to say "Say hello", left
        over from a template whose app only printed a greeting. -->
   <button id="hello-button" type="button">Add one</button>
 
-  <!-- Nothing here says the app is ready for offline use. A line that only ever
+  <!-- Nothing here says the app is ready for offline use: a line that only ever
        reports good news the reader did not ask about is noise, and it was the
        only thing standing between the button and the bottom of the panel. The
-       worker still registers, and the failure case below is the one worth a
-       line of the reader's attention. -->
+       worker still registers; the failure box below is the one worth the
+       reader's attention. -->
   <p id="error" role="alert" hidden></p>
 </main>
 <noscript>This counter needs JavaScript enabled. Turn it on and reload to use it.</noscript>
 <!-- The one script in the document: it hands over to the generated bindings and
      does nothing else. No state, no rendering, no event handling — everything
      below the import is the failure message for the case where the app never
-     loads, which is a real case worth saying something about. The wording says
-     what the user loses, never what the app is built with. -->
+     loads, which is a real case worth saying something about. -->
 <script type="module">
 import('./app.js').then(m => m.default()).catch(error => {
   const box = document.getElementById('error');
