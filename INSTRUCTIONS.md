@@ -49,7 +49,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Keep `src/<domain>.rs` for the logic, `src/ui.rs` for the DOM, `src/ui.html` for the shell.
 - Keep `src/service-worker.js` a committed template for install, activate and fetch only, with exactly one `__VERSION__` for `build.rs` to substitute.
 - Assemble `manifest.webmanifest` in `build.rs`, and build its icon list from the sizes actually rasterized so the two cannot drift.
-- Keep `id`, `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere.
+- Keep `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere. Declare **no** `id`: Chrome resolves a relative id against `start_url`'s *origin*, so `"./"` would give every app in the family the same install identity and Android would swallow the second install as an update of the first. Left out, identity falls back to `start_url`, which is unique per app.
 - Use `"display": "standalone"` unless the app specifically needs another mode.
 - Keep `assets/icon.svg` as the committed, authoritative icon — simple, one colour, transparent — and never replace it with a PNG.
 - Pick an icon colour that stays legible on a light surface and a dark one, and measure it rather than eyeballing it: a single static icon cannot clear 4.5:1 on both, so aim for the 3:1 bar for a graphical object and split the difference.
@@ -117,7 +117,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Lint the wasm target with the same `RUSTFLAGS`/`rustc-cfg` the crate builds with; `web-sys` changes an accessor's return type under `--cfg=web_sys_unstable_apis`, so a leg without it is a false green.
 - Add no compiler flag this app does not need: a clean wasm build needs no `--cfg=web_sys_unstable_apis`, and carrying one lints a different program from the one that ships.
 - Put the GitHub Pages deploy in its own workflow, never in `build.yml`, and scope `pages: write`/`id-token: write` to the deploy job alone; a fork PR has neither permission nor the environment.
-- Deploy on master only, never on tags, and hand `deploy-pages` the artifact by `artifact_name`; v5 has no `artifact_id` input and ignores one.
+- Deploy on master only, never on tags, gate it on `github.ref == 'refs/heads/master' && !github.event.repository.fork` in that one `if:`, and hand `deploy-pages` the artifact by `artifact_name`; v5 has no `artifact_id` input and ignores one. The fork clause is not tidiness: a copy of this template is usually made into a fork, which has a `master` too, so a branch-name-only gate publishes from both and dies on "Ensure GitHub Pages has been enabled". Test `repository.fork`, never a repository variable — a variable would have to be set on the user's own repo, so the gate ships silently off on the one repo that owns the site.
 - Check the built site by naming every file, not by counting: a file that is referenced but never written does not change the count.
 - Fail on unexpected files as well as missing ones; a file nobody meant to publish is as much a defect as one that is absent, and neither shows up in a green build.
 - Check the manifest against what was actually rasterized, not against a copy of the source.

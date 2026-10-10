@@ -2,7 +2,7 @@
 // AGPL License
 // Browser lifecycle/cache plumbing only; all app logic remains Rust.
 //
-// The whole worker is install, activate, fetch. Three rules hold it together:
+// The whole worker is install, activate, fetch. Four rules hold it together:
 //
 // * Every path is relative to `self.location`, so the app installs and works
 //   from whatever subdirectory it is published under.
@@ -10,13 +10,11 @@
 //   of every other shell file — the wasm included — and this template. Change
 //   the app, or this caching logic, and the cache name changes with it.
 // * No `skipWaiting`. An update takes over once the old tabs are gone, so a
-//   live app never swaps the wasm out from under itself. A user mid-session
-//   gets the app they started with, then the new one on the next launch.
+//   live app never swaps the wasm out from under itself.
 // * The fetch handler only ever answers for a URL inside this app's own
 //   directory, checked on every request rather than assumed from the scope.
 //   Scope is a registration's claim, not a promise, and these apps share one
-//   origin with pages that are not this app. An allowlist scoped to the
-//   directory is the guard that holds even if the scope is ever wrong.
+//   origin with pages that are not this app.
 
 const ROOT = new URL('./', self.location.href);
 const CACHE = 'pwa-template-' + ROOT.pathname + '-__VERSION__';
@@ -38,11 +36,9 @@ self.addEventListener('activate', event => {
 });
 
 self.addEventListener('fetch', event => {
-  // Deliberately leave everything else alone. An allowlist, not a
-  // catch-all: this worker has no business touching anything it did not
-  // precache, including the pages the user navigates away to. The directory
-  // check is the second half of the same rule -- a request outside this app's
-  // own directory is never this worker's to answer, whatever the scope says.
+  // An allowlist, not a catch-all: this worker has no business touching anything
+  // it did not precache, including the pages the user navigates away to. The
+  // directory check is the second half of the same rule.
   const url = event.request.url;
   if (event.request.method !== 'GET' || !IS_OWN(url) || !ASSETS.includes(url)) return;
   event.respondWith((async () => {

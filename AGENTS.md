@@ -150,6 +150,31 @@ and falls back to its own default. Both sides therefore state `artifact_name`
 explicitly and `tests/shell.rs` asserts they are the same string, so a mismatch
 is a diff rather than a bare `HttpError: Not Found` at run time.
 
+**The deploy gate has two halves, and the second one is the one people forget.**
+It is `github.ref == 'refs/heads/master' && !github.event.repository.fork`. The
+fork clause is not optional tidiness: this repository *is* a fork
+(`bot-git-ai/pwa_template` of `wdomitrz/pwa_template`), and a fork exists
+precisely so its files can be copied — so this workflow is byte-identical in
+both, both have a `master`, and a gate that keys only on the branch name cannot
+tell them apart. A push to the fork's master then builds green, runs the full
+site check, and dies at the deploy with "Ensure GitHub Pages has been enabled",
+because a fork has no Pages site until someone enables one by hand.
+
+`github.event.repository.fork` is the discriminator because the event supplies
+it — false upstream, true in the fork — and it needs no configuration anywhere. A
+repository Actions variable (`vars.PUBLISH_PAGES`) reads as more explicit and is
+strictly worse: it would have to be set on the *user's* repository to publish,
+and this account holds only `pull` there, so the one setting that turns on the
+live site would be one nobody but the user could make. A gate that must be
+configured before it works ships as silently off, and a silently-off deploy gate
+on the repository that owns the site is worse than a red fork run.
+
+**A copy of this template is usually made into a fork as well**, so the clause
+has to survive the copy. `tests/shell.rs` asserts both halves of the gate, in
+one `if:`, read from the comment-stripped workflow — the comment above the gate
+names both halves while explaining them, so an assertion over raw text is
+satisfied by the prose with the clause deleted.
+
 **Pages must be enabled in the repository's settings** (Settings → Pages →
 Source → GitHub Actions) before any of this deploys. That is a one-time action
 by the repository's owner, and it is not something a workflow can do for itself.
@@ -254,12 +279,20 @@ comments stripped — commenting a line out instead of deleting it is the mutati
 most likely to be applied to any of them, and it satisfies an assertion that
 reads raw text. Eleven of those: the generator pin matches `Cargo.toml` and is
 declared rather than only used; no `RUSTFLAGS` where the crate needs none; master
-is the only ref that can reach the live site; the publishing permissions are in
-the `deploy` job and nowhere else; the deploy is handed the artifact the build
-uploaded, by name; the deploy is not in `build.yml`; every action is pinned to a
-40-character commit SHA; the site check names all eight files and greps the
-things a green build cannot imply; and both workflows pin the icon digest this
-repository actually has.
+is the only ref that can reach the live site **and** not from a fork; the
+publishing permissions are in the `deploy` job and nowhere else; the deploy is
+handed the artifact the build uploaded, by name; the deploy is not in
+`build.yml`; every action is pinned to a 40-character commit SHA; the site check
+names all eight files and greps the things a green build cannot imply; and both
+workflows pin the icon digest this repository actually has.
+
+The fork half of the deploy gate is asserted from the comment-stripped workflow
+and on its own line, because the comment directly above that gate names both
+halves while explaining them: read raw, the prose satisfies the assertion with the
+clause deleted. Seven mutations were run against it — clause deleted, whole line
+commented out, only the fork half commented out, clause split onto a second
+`if:`, the `vars.PUBLISH_PAGES` variant, the master half dropped, and the clause
+moved to the `build` job — and every one goes red.
 
 That last one is not decoration. The icon's SHA-256 lives in three places — the
 `ICON_SHA256` constant in `tests/shell.rs` and one copy in each workflow's site
