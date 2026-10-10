@@ -252,8 +252,11 @@ jobs:
                "type": "image/png", "purpose": "any maskable"}
               for size in (192, 512)
           ], manifest["icons"]
-          for key in ("id", "start_url", "scope"):
+          for key in ("start_url", "scope"):
               assert manifest[key] == "./", f"{key} must be relative"
+          assert "id" not in manifest, (
+              "an id of \"./\" resolves to the bare origin and collides with every sibling app"
+          )
           print("  ok   manifest agrees with the rasterized icons and mounts anywhere")
           PY
 

@@ -209,11 +209,16 @@ fn icon_entry(name: &str, size: u32) -> serde_json::Value {
 /// The manifest, assembled from the declared identity and the icons that were
 /// actually rasterized.
 ///
-/// `id`, `start_url` and `scope` are all `"./"`, so one build works from any
-/// subdirectory and installs under the path it is served from.
+/// `start_url` and `scope` are `"./"`, so one build works from any
+/// subdirectory. The `id` member is deliberately absent: Chrome resolves a
+/// relative id against `start_url`'s *origin*, not the manifest's directory,
+/// so a literal `"./"` would give every app in this family the same install
+/// identity — and Android treats a manifest whose id matches an installed app
+/// as an update of that app, swallowing the second install. Left out, identity
+/// falls back to `start_url`, which resolves against the manifest URL and is
+/// unique per app.
 fn manifest(icons: &[serde_json::Value]) -> String {
     serde_json::json!({
-        "id": "./",
         "name": MANIFEST.name,
         "short_name": MANIFEST.short_name,
         "start_url": "./",

@@ -49,7 +49,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Keep `src/<domain>.rs` for the logic, `src/ui.rs` for the DOM, `src/ui.html` for the shell.
 - Keep `src/service-worker.js` a committed template for install, activate and fetch only, with exactly one `__VERSION__` for `build.rs` to substitute.
 - Assemble `manifest.webmanifest` in `build.rs`, and build its icon list from the sizes actually rasterized so the two cannot drift.
-- Keep `id`, `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere.
+- Keep `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere. Declare **no** `id`: Chrome resolves a relative id against `start_url`'s *origin*, so `"./"` would give every app in the family the same install identity and Android would swallow the second install as an update of the first. Left out, identity falls back to `start_url`, which is unique per app.
 - Use `"display": "standalone"` unless the app specifically needs another mode.
 - Keep `assets/icon.svg` as the committed, authoritative icon — simple, one colour, transparent — and never replace it with a PNG.
 - Pick an icon colour that stays legible on a light surface and a dark one, and measure it rather than eyeballing it: a single static icon cannot clear 4.5:1 on both, so aim for the 3:1 bar for a graphical object and split the difference.
