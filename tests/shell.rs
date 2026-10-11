@@ -1461,6 +1461,49 @@ fn both_workflows_pin_the_icon_the_repository_still_has() {
     }
 }
 
+/// The manifest assertions in the two workflows must be the same
+/// assertions. They are kept as two embedded copies of one policy, and an
+/// edit that lands in one and not the other does not go red in a pull
+/// request: `build.yml` runs on the PR, but `pages.yml` does not — it runs
+/// on master, *as the deploy*, where red means the site stops publishing.
+/// That exact drift happened on 2026-10-11: the manifest-identity change
+/// (no `id`) updated `build.yml` and left `pages.yml` demanding
+/// `id == "./"`, so the deploy gate failed for a day and the template's
+/// published site kept serving the old, colliding manifest.
+#[test]
+fn both_workflows_assert_the_same_manifest_identity() {
+    let Some((build, pages)) = (|| Some((workflow("build.yml")?, workflow("pages.yml")?)))() else {
+        return; // a partial export need not carry every workflow
+    };
+    let extract = |text: &str| {
+        text.split("with open(\"dist/manifest.webmanifest\"")
+            .nth(1)
+            .and_then(|rest| rest.split("PY\n").next())
+            .expect("each workflow must embed a manifest check")
+            .to_owned()
+    };
+    let (build_block, pages_block) = (extract(&build), extract(&pages));
+    for needle in [
+        "for key in (\"start_url\", \"scope\"):",
+        "assert \"id\" not in manifest",
+    ] {
+        assert!(
+            build_block.contains(needle) && pages_block.contains(needle),
+            "the manifest checks in build.yml and pages.yml have drifted apart: \
+             {needle:?} is missing from one of them. The identity policy must be \
+             identical in both — only build.yml runs on pull requests, so a \
+             check that exists only in pages.yml is a deploy gate that fails \
+             after the merge, when the site has already stopped publishing."
+        );
+    }
+    assert!(
+        !pages_block.contains("(\"id\""),
+        "pages.yml must not treat `id` as a required relative key; identity \
+         falls back to start_url and a relative id collides with every \
+         sibling app on the origin"
+    );
+}
+
 /// The site check the workflow runs must assert on the site, not on the exit
 /// status.
 ///
