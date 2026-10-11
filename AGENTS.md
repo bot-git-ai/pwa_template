@@ -268,6 +268,16 @@ already substituted, the bindings carrying the exports the page's dynamic import
 needs, `dist/icon.svg` identical to the committed icon, and a manifest whose icon
 list matches what was actually rasterized.
 
+Two identity rules hold across every app generated from this template, and the
+worker template carries both. The manifest declares no `id`, so an install's
+identity falls back to its own `start_url` instead of a path-relative id that
+resolves to the bare origin. And the worker, while still precaching the
+manifest — a broken one must fail the install loudly — never answers a
+manifest request from its cache: the manifest is what the browser reads to
+decide what an install *is*, a cached copy would let a fresh install re-derive
+a stale identity, and Cache Storage survives an uninstall, so the stale
+identity would outlive the app that wrote it.
+
 That check is the only automated coverage of the built site, and it is aimed at
 the two failures this shape has actually had: a `dist/` that looks publishable
 and has no app in it, and a `dist/` that has everything except one file nobody

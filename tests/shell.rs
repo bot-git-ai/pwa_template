@@ -195,6 +195,33 @@ fn precached_by_the_worker() -> Vec<String> {
         .collect()
 }
 
+/// The manifest is what the browser reads to decide what an install *is*, so
+/// it is the one precached URL the worker must never answer from the cache: a
+/// cached copy would let a fresh install re-derive the app's identity from a
+/// manifest older than the last change to it — the exact shape of the bug
+/// that once made every install in this family claim the same identity. It
+/// still sits in `ASSETS`, so a manifest that 404s fails the install loudly;
+/// it just always reaches the network.
+#[test]
+fn the_worker_never_serves_the_manifest_from_the_cache() {
+    let worker = worker_template();
+    assert!(
+        precached_by_the_worker()
+            .iter()
+            .any(|asset| asset == "manifest.webmanifest"),
+        "the manifest must stay in ASSETS: a broken manifest must fail the install loudly"
+    );
+    let fetch = worker
+        .split_once("addEventListener('fetch'")
+        .expect("the worker must handle fetch")
+        .1;
+    assert!(
+        fetch.contains("url === MANIFEST"),
+        "the fetch handler must exempt the manifest before ever touching the cache; \
+         a cached manifest lets an install re-derive a stale identity"
+    );
+}
+
 /// Every URL the worker precaches is a file `build.rs` publishes.
 ///
 /// This is the assertion that would have caught the missing `icon.svg`, and it
@@ -936,8 +963,14 @@ fn the_instructions_are_still_a_short_flat_list() {
     // all silent. It is a deliberate change and the reason is here rather than
     // in a commit message, so the next person to hit the bound knows what the
     // number is guarding against and does not raise it again on a whim.
+    //
+    // It moved a second time, on 2026-10-11, from 95 to 100, for the same
+    // shape of reason: the manifest-identity rules (no relative `id`; the
+    // worker never serves the manifest from its cache) guard failures that
+    // present as "the wrong app installed" or "the old app came back", never
+    // as a build error. One rule was added for the second of those.
     assert!(
-        rules.len() >= 30 && rules.len() <= 95,
+        rules.len() >= 30 && rules.len() <= 100,
         "the rules must stay a short list, not an essay: {} rules",
         rules.len()
     );
