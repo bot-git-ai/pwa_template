@@ -50,8 +50,7 @@ fn tracked_files() -> Option<String> {
         .args(["rev-parse", "--git-dir"])
         .current_dir(root())
         .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false);
+        .is_ok_and(|out| out.status.success());
     if !inside {
         return None;
     }
@@ -689,11 +688,59 @@ fn the_service_worker_template_has_exactly_one_placeholder() {
         worker.contains("'icon.svg'"),
         "the worker does not precache the icon's source of truth"
     );
-    // `skipWaiting` must not be *called*. The word appears in the template's
-    // own comment explaining why it is absent, so match the call.
+    // The one allowed call is behind the page's `SKIP_WAITING` message: the
+    // ask comes from the page that immediately reloads as the worker takes
+    // over, so no client ever straddles the two versions. Asserted
+    // structurally — the call must sit inside the message handler, gated on
+    // the message — so an unprompted or unconditional call cannot creep in.
+    let handler = worker
+        .split("addEventListener('message'")
+        .nth(1)
+        .expect("the worker must listen for the page's handover message");
+    let handler = &handler[..handler.find("});").expect("the message handler closes")];
     assert!(
-        !worker.contains("skipWaiting("),
-        "an update must never swap the wasm under a live tab"
+        handler.contains("event.data === 'SKIP_WAITING'") && handler.contains("skipWaiting()"),
+        "skipWaiting must be the worker's answer to the page's ask, never a call \
+         it makes on its own"
+    );
+    let outside: Vec<&str> = worker
+        .split("addEventListener('message'")
+        .next()
+        .expect("the prefix before the handler")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("skipWaiting"))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "no skipWaiting outside the message handler: an update must never swap \
+         the wasm under a live tab unasked, but found {outside:?}"
+    );
+}
+
+/// The page asks a newly installed worker in, and reloads as it takes over.
+///
+/// Without the ask, an installed copy only ever moves to a new version when
+/// every opening of it has closed — on a phone, possibly never. This pins
+/// both halves: the page's message, which the worker answers with
+/// `skipWaiting`, and the page's own reload on `controllerchange`.
+#[test]
+fn the_page_takes_an_installed_worker_over_with_a_reload() {
+    let code =
+        strip_rust_comments(&std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs"));
+    assert!(
+        code.contains("registration.waiting()") && code.contains(".installing()"),
+        "the page must look at both workers an update can leave behind: one already \
+         installed and waiting, and one discovered while the page stands"
+    );
+    assert!(
+        code.contains("post_message(&JsValue::from_str(\"SKIP_WAITING\"))"),
+        "the handover starts with the page's message; the worker never swaps \
+         itself in unasked"
+    );
+    assert!(
+        code.contains("controllerchange") && code.contains("location().reload()"),
+        "and ends with the page reloading exactly as the worker takes over"
     );
 }
 
@@ -968,7 +1015,9 @@ fn the_instructions_are_still_a_short_flat_list() {
     // shape of reason: the manifest-identity rules (no relative `id`; the
     // worker never serves the manifest from its cache) guard failures that
     // present as "the wrong app installed" or "the old app came back", never
-    // as a build error. One rule was added for the second of those.
+    // as a build error. One rule was added for the second of those. The
+    // `skipWaiting` rule was rewritten the same day — message-gated, with the
+    // page reload — without changing the count.
     assert!(
         rules.len() >= 30 && rules.len() <= 100,
         "the rules must stay a short list, not an essay: {} rules",
@@ -1486,10 +1535,10 @@ fn both_workflows_pin_the_icon_the_repository_still_has() {
         let live = strip_yaml_comments(&text);
         assert!(
             live.contains(&digest),
-            "{} pins a digest for assets/icon.svg that is not the icon this repository has \
-             (the file hashes to {digest}); the workflow has been red since the icon changed, \
-             and shipping it would pin the wrong icon as 'the author's original'",
-            workflow_name,
+            "{workflow_name} pins a digest for assets/icon.svg that is not the icon this \
+             repository has (the file hashes to {digest}); the workflow has been red since \
+             the icon changed, and shipping it would pin the wrong icon as 'the author's \
+             original'",
         );
     }
 }
@@ -1819,23 +1868,86 @@ permissions:
 /// — so this is the FIPS 180-4 round constants and 64 rounds, and it is
 /// checked against the published test vectors in the test below. If you ever
 /// change this function, that test has to keep passing.
+///
+/// The length is the algorithm's, not a style choice: FIPS 180-4 is what it is.
+#[allow(clippy::too_many_lines)]
 fn sha256_hex(bytes: &[u8]) -> String {
     const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-        0xc67178f2,
+        0x428a_2f98,
+        0x7137_4491,
+        0xb5c0_fbcf,
+        0xe9b5_dba5,
+        0x3956_c25b,
+        0x59f1_11f1,
+        0x923f_82a4,
+        0xab1c_5ed5,
+        0xd807_aa98,
+        0x1283_5b01,
+        0x2431_85be,
+        0x550c_7dc3,
+        0x72be_5d74,
+        0x80de_b1fe,
+        0x9bdc_06a7,
+        0xc19b_f174,
+        0xe49b_69c1,
+        0xefbe_4786,
+        0x0fc1_9dc6,
+        0x240c_a1cc,
+        0x2de9_2c6f,
+        0x4a74_84aa,
+        0x5cb0_a9dc,
+        0x76f9_88da,
+        0x983e_5152,
+        0xa831_c66d,
+        0xb003_27c8,
+        0xbf59_7fc7,
+        0xc6e0_0bf3,
+        0xd5a7_9147,
+        0x06ca_6351,
+        0x1429_2967,
+        0x27b7_0a85,
+        0x2e1b_2138,
+        0x4d2c_6dfc,
+        0x5338_0d13,
+        0x650a_7354,
+        0x766a_0abb,
+        0x81c2_c92e,
+        0x9272_2c85,
+        0xa2bf_e8a1,
+        0xa81a_664b,
+        0xc24b_8b70,
+        0xc76c_51a3,
+        0xd192_e819,
+        0xd699_0624,
+        0xf40e_3585,
+        0x106a_a070,
+        0x19a4_c116,
+        0x1e37_6c08,
+        0x2748_774c,
+        0x34b0_bcb5,
+        0x391c_0cb3,
+        0x4ed8_aa4a,
+        0x5b9c_ca4f,
+        0x682e_6ff3,
+        0x748f_82ee,
+        0x78a5_636f,
+        0x84c8_7814,
+        0x8cc7_0208,
+        0x90be_fffa,
+        0xa450_6ceb,
+        0xbef9_a3f7,
+        0xc671_78f2,
     ];
 
     let mut state: [u32; 8] = [
-        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-        0x5be0cd19,
+        0x6a09_e667,
+        0xbb67_ae85,
+        0x3c6e_f372,
+        0xa54f_f53a,
+        0x510e_527f,
+        0x9b05_688c,
+        0x1f83_d9ab,
+        0x5be0_cd19,
     ];
 
     // Pad to a multiple of 64 bytes: 0x80, zeros, then the bit length as u64be.
@@ -1847,52 +1959,65 @@ fn sha256_hex(bytes: &[u8]) -> String {
     }
     message.extend_from_slice(&bits.to_be_bytes());
 
-    for (block, _) in message.as_chunks::<64>().0.iter().map(|b| (b, ())) {
-        let mut w = [0u32; 64];
-        for (index, (word, _)) in block.as_chunks::<4>().0.iter().map(|w| (w, ())).enumerate() {
-            w[index] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+    for block in message.as_chunks::<64>().0 {
+        let mut words = [0u32; 64];
+        for (index, (word, ())) in block
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|chunk| (chunk, ()))
+            .enumerate()
+        {
+            words[index] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
         }
         for index in 16..64 {
-            let s0 = w[index - 15].rotate_right(7)
-                ^ w[index - 15].rotate_right(18)
-                ^ (w[index - 15] >> 3);
-            let s1 = w[index - 2].rotate_right(17)
-                ^ w[index - 2].rotate_right(19)
-                ^ (w[index - 2] >> 10);
-            w[index] = w[index - 16]
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
                 .wrapping_add(s0)
-                .wrapping_add(w[index - 7])
+                .wrapping_add(words[index - 7])
                 .wrapping_add(s1);
         }
 
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        // The eight working variables of FIPS 180-4 §6.2.2, named `v0`..`v7`
+        // here because `a`..`h` trip the single-character-name lint; the
+        // rotation below is the spec's, only renamed.
+        let [mut v0, mut v1, mut v2, mut v3, mut v4, mut v5, mut v6, mut v7] = state;
         for index in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choose = (e & f) ^ (!e & g);
-            let temp1 = h
+            let s1 = v4.rotate_right(6) ^ v4.rotate_right(11) ^ v4.rotate_right(25);
+            let choose = (v4 & v5) ^ (!v4 & v6);
+            let temp1 = v7
                 .wrapping_add(s1)
                 .wrapping_add(choose)
                 .wrapping_add(K[index])
-                .wrapping_add(w[index]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
+                .wrapping_add(words[index]);
+            let s0 = v0.rotate_right(2) ^ v0.rotate_right(13) ^ v0.rotate_right(22);
+            let majority = (v0 & v1) ^ (v0 & v2) ^ (v1 & v2);
             let temp2 = s0.wrapping_add(majority);
 
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temp1);
-            d = c;
-            c = b;
-            b = a;
-            a = temp1.wrapping_add(temp2);
+            v7 = v6;
+            v6 = v5;
+            v5 = v4;
+            v4 = v3.wrapping_add(temp1);
+            v3 = v2;
+            v2 = v1;
+            v1 = v0;
+            v0 = temp1.wrapping_add(temp2);
         }
-        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+        for (slot, value) in state.iter_mut().zip([v0, v1, v2, v3, v4, v5, v6, v7]) {
             *slot = slot.wrapping_add(value);
         }
     }
 
-    state.iter().map(|word| format!("{word:08x}")).collect()
+    state
+        .iter()
+        .map(|word| format!("{word:08x}"))
+        .collect::<Vec<String>>()
+        .concat()
 }
 
 /// The digest function above is load-bearing for the icon test, so it is

@@ -198,8 +198,11 @@ Until then the deploy job fails and the build half of it is still true.
   whose whole body is a dynamic import with a failure message. The README of the
   design is that a copy of this app renames four ids and deletes nothing.
 - `service-worker.js`: install, activate, cache-first on an allowlist of `GET`s.
-  No `skipWaiting`: an update takes over after the old tabs close, so a live app
-  never swaps the wasm out from under itself.
+  Its `skipWaiting` answers only the page's `SKIP_WAITING` message: an update
+  never swaps the wasm under a live app unasked, and the page that asks
+  (`ui.rs`'s `nudge_worker_update`) reloads on `controllerchange` — so an
+  installed copy updates on its next open instead of waiting for a visit that
+  never comes.
 - `build.rs`: writes the six files it owns, rasterizes the install icons from the
   committed SVG, assembles the manifest, and derives the worker's cache version.
 - `assets/icon.svg`: the icon, and the source of every install icon. It is

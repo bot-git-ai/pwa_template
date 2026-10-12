@@ -66,7 +66,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Store data in `localStorage` only when persistence is useful, under an app-specific key prefix.
 - Write nothing on first load; an app the user never touched should leave no trace.
 - Cache the shell on install, drop old caches on activate, and claim clients.
-- Never call `skipWaiting`: an update must not swap the wasm under a live tab.
+- Never call `skipWaiting` on the worker's own initiative: an update must not swap the wasm under a live tab. The one allowed call answers the page's `SKIP_WAITING` message, and the page that sends it reloads on `controllerchange` — an installed copy updates on its next open, and no page is ever swapped under without having asked.
 - Serve from an allowlist of `GET` requests, and leave everything else alone.
 - Report offline readiness in the page, not only in the console; it needs one successful visit over HTTPS or localhost.
 

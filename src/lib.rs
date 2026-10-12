@@ -8,7 +8,7 @@
 //! * [`counter`] — the app's logic. No `web-sys`, no `js-sys`, no
 //!   `wasm-bindgen`, so it compiles natively and is unit tested by plain
 //!   `cargo test`.
-//! * [`ui`] — the browser layer, compiled only for `wasm32-unknown-unknown`.
+//! * `ui` — the browser layer, compiled only for `wasm32-unknown-unknown`.
 //!   Every `document`, `localStorage` and service-worker call lives here, and
 //!   nothing else does.
 //!
