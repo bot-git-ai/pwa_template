@@ -1,6 +1,3 @@
-# Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-# AGPL License
-
 [package]
 name = "pwa_template"
 version = "0.1.0"

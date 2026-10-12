@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
 // Browser lifecycle/cache plumbing only; all app logic remains Rust.
 //
 // The whole worker is install, activate, fetch. Four rules hold it together:

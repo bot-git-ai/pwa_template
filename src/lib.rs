@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! A minimal Rust PWA, and the starting point for the next one.
 //!
 //! The split this crate exists to demonstrate:

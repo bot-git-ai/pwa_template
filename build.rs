@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! Write the site to `dist/` while the crate compiles.
 //!
 //! The app is a static site, so publishing it is a file copy plus three small
@@ -179,12 +176,14 @@ fn rasterize(svg: &[u8], size: u32) -> Vec<u8> {
 
     // 512 is a power of two, so the pixmap request can only fail if the
     // allocation fails; `Pixmap::new` returns an `Option`, not a `Result`.
-    let mut pixmap = match tiny_skia::Pixmap::new(size, size) {
-        Some(pixmap) => pixmap,
-        None => panic!("a {size}x{size} pixmap could not be allocated"),
+    let Some(mut pixmap) = tiny_skia::Pixmap::new(size, size) else {
+        panic!("a {size}x{size} pixmap could not be allocated");
     };
-    // `size` is a `u32` and the transform is `f32`, so this divides in `f32`;
-    // dividing in `f64` and casting afterwards is the mistake to avoid.
+    // `size` is a `u32` and the transform is `f32`; every icon size is far
+    // below f32's 24-bit exact-integer range, so the conversion is exact.
+    // The division stays in `f32`: dividing in `f64` and casting afterwards
+    // is the mistake to avoid.
+    #[allow(clippy::cast_precision_loss)]
     let scale = size as f32 / tree.size().width();
     resvg::render(
         &tree,
