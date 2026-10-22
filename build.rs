@@ -68,7 +68,11 @@ use std::path::{Path, PathBuf};
 /// bar can follow the system.
 const MANIFEST: Manifest = Manifest {
     name: "Simple PWA",
-    short_name: "PWA",
+    // The launcher label is the app's name: one name in both fields. A short
+    // name is only worth having when it still names the thing, and "PWA" says
+    // nothing about what the app does — it would be the label under every icon
+    // this template makes.
+    short_name: "Simple PWA",
     background_color: "#0f1117",
 };
 
