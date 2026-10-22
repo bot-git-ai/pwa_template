@@ -40,7 +40,7 @@ touch build.rs
 cargo build --release --locked
 ```
 
-Step 1 writes `dist/app.js` and `dist/app_bg.wasm`; step 2 adds the six files
+Step 1 writes `dist/app.js` and `dist/app_bg.wasm`; step 2 adds the seven files
 `build.rs` owns and derives the service worker's cache version.
 
 The order matters: the cache version is hashed from every other file in
@@ -84,12 +84,13 @@ green.
 
 ## The static site
 
-Eight files, from two builds, and two owners:
+Nine files, from two builds, and two owners:
 
 - `app.js` and `app_bg.wasm` are written by `wasm-bindgen`. They are the app
   itself and exist nowhere else in the tree.
-- The other six are written by `build.rs` during step 2, from committed sources:
-  `index.html` (from `src/ui.html`, byte for byte), `service-worker.js` (with
+- The other seven are written by `build.rs` during step 2, from committed sources:
+  `index.html` and `style.css` (from `src/ui.html` and `src/style.css`, byte for
+  byte), `service-worker.js` (with
   its cache name pinned to a version derived from the bytes of every other file
   in the directory **and its own source**), `icon.svg`, `icon-192.png`,
   `icon-512.png`, and `manifest.webmanifest`.
@@ -147,13 +148,21 @@ Until then the deploy job fails and the build half of it is still true.
   worker. It makes no decisions — everything it displays was decided and tested
   in `counter.rs`. It reports nothing to the page: the worker registers, and
   whether that worked is a console warning, not a line of the reader's screen.
-- `ui.html`: the static shell. One inline `<style>`, one `<script type="module">`
-  whose whole body is a dynamic import with a failure message. The README of the
-  design is that a copy of this app renames four ids and deletes nothing.
+- `ui.html`: the static shell. Structure and meta tags only, a link to the
+  stylesheet, and one `<script type="module">` whose whole body is a dynamic
+  import with a failure message. The README of the design is that a copy of this
+  app renames four ids and deletes nothing.
+- `style.css`: the one stylesheet, published byte for byte. It is a file rather
+  than a `<style>` block for three reasons that all show up in a real deploy: the
+  worker can precache and version it as its own entry, a browser caches it across
+  navigations instead of re-downloading it inside every HTML response, and a
+  stale-while-revalidate bug is visible in the network panel as a missed
+  `dist/style.css` rather than an invisible one inside the document. Its
+  light-scheme block is covered by a test that allows colours and nothing else.
 - `service-worker.js`: install, activate, cache-first on an allowlist of `GET`s.
   No `skipWaiting`: an update takes over after the old tabs close, so a live app
   never swaps the wasm out from under itself.
-- `build.rs`: writes the six files it owns, rasterizes the install icons from the
+- `build.rs`: writes the seven files it owns, rasterizes the install icons from the
   committed SVG, assembles the manifest, and derives the worker's cache version.
 - `assets/icon.svg`: the icon, and the source of every install icon. It is
   published to `dist/` unchanged and rasterized to the two PNGs at build time; it

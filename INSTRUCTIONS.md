@@ -23,7 +23,8 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 
 ## The shell
 
-- Keep `src/ui.html` a static shell: structure, one inline `<style>` block, meta tags, and empty containers with ids.
+- Keep `src/ui.html` a static shell: structure, meta tags, a `<link rel="stylesheet" href="./style.css">`, and empty containers with ids.
+- Keep the styles in `src/style.css`, never a `<style>` block: the worker precaches it by name, and the browser caches it apart from the HTML.
 - Give the page exactly one `<script type="module">`, whose whole body is `import('./app.js').then(m => m.default()).catch(...)`.
 - Put no application logic in that loader — no event listener, no state, no `fetch` — and keep the catch, so a failure says plainly that the app could not start.
 - Declare no manual wasm ABI: no `instantiateStreaming`, no `wasm.exports`, no hand-written pointer protocol.

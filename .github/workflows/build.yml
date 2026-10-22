@@ -181,7 +181,7 @@ jobs:
           # nothing that looks wrong. Three sibling workflows had exactly that.
           # The quoted delimiter also stops the shell expanding `$` inside the
           # body, which a JSON or shell check here would otherwise mangle.
-          expected="app.js app_bg.wasm icon.svg icon-192.png icon-512.png index.html manifest.webmanifest service-worker.js"
+          expected="app.js app_bg.wasm icon.svg icon-192.png icon-512.png index.html manifest.webmanifest service-worker.js style.css"
           missing=""
           for file in $expected; do
             if [ -s "dist/${file}" ]; then

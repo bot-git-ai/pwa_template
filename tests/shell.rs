@@ -33,6 +33,13 @@ fn shell() -> String {
 }
 
 /// The service worker template, as committed.
+/// The committed stylesheet, as the build publishes it.
+fn style() -> String {
+    let path = root().join("src/style.css");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()))
+}
+
 fn worker_template() -> String {
     let path = root().join("src/service-worker.js");
     std::fs::read_to_string(&path)
@@ -68,7 +75,7 @@ fn tracked_files() -> Option<String> {
 /// `every_precached_file_is_published_by_the_build_script`). This list is what
 /// the workflow's site check uses, and it is written out by name on purpose: a
 /// count would not catch a file that is referenced but never written.
-const DIST_FILES: [&str; 8] = [
+const DIST_FILES: [&str; 9] = [
     "app.js",
     "app_bg.wasm",
     "icon.svg",
@@ -77,6 +84,7 @@ const DIST_FILES: [&str; 8] = [
     "index.html",
     "manifest.webmanifest",
     "service-worker.js",
+    "style.css",
 ];
 
 /// The files `build.rs` publishes, read out of the script itself.
@@ -251,7 +259,7 @@ fn everything_the_build_publishes_is_precached_or_understood() {
 
 /// `dist/` is the union of the two owners, and the worker allowlists exactly
 /// that. This is the test that reports a site in terms a reader can act on:
-/// eight files, eight precached, nothing referenced and unwritten.
+/// nine files, nine precached, nothing referenced and unwritten.
 #[test]
 fn the_whole_site_is_the_union_of_its_two_owners() {
     let mut site = published_by_build_script();
@@ -398,17 +406,29 @@ fn the_page_is_accessible_and_installable() {
     ] {
         assert!(page.contains(required), "the shell is missing {required}");
     }
+    // The stylesheet is its own file: linked from the shell, precached by the
+    // worker and versioned with the rest of the site, rather than inlined where
+    // nothing can cache or diff it on its own.
     assert!(
-        page.contains("outline: 3px solid"),
+        page.contains("rel=\"stylesheet\" href=\"./style.css\""),
+        "the shell must link its stylesheet, relative to itself"
+    );
+    assert!(
+        !page.contains("<style"),
+        "the shell must not inline its styles: they live in src/style.css"
+    );
+    let css = style();
+    assert!(
+        css.contains("outline: 3px solid"),
         "focus must stay visible"
     );
     assert!(
-        page.contains("min-height: 44px"),
+        css.contains("min-height: 44px"),
         "touch targets must be large enough for mobile use"
     );
     assert!(
-        page.contains("prefers-color-scheme") && page.contains("prefers-reduced-motion"),
-        "the shell must respect both media queries"
+        css.contains("prefers-color-scheme") && css.contains("prefers-reduced-motion"),
+        "the stylesheet must respect both media queries"
     );
 }
 
@@ -926,15 +946,17 @@ fn the_instructions_are_still_a_short_flat_list() {
         "INSTRUCTIONS.md must open with a heading"
     );
     let rules: Vec<&str> = text.lines().filter(|line| line.starts_with("- ")).collect();
-    // The upper bound moved once, on 2026-10-02, from 90 to 95, when the GitHub
-    // Pages rules were added: publishing the site is part of the contract, and
-    // the failures it guards — a deploy in the CI build, publishing permissions
-    // granted workflow-wide, an `artifact_id` that v5 silently ignores — are
-    // all silent. It is a deliberate change and the reason is here rather than
-    // in a commit message, so the next person to hit the bound knows what the
-    // number is guarding against and does not raise it again on a whim.
+    // The upper bound moved twice, and both times deliberately. On 2026-10-02
+    // from 90 to 95, when the GitHub Pages rules were added: publishing the site
+    // is part of the contract, and the failures it guards — a deploy in the CI
+    // build, publishing permissions granted workflow-wide, an `artifact_id` that
+    // v5 silently ignores — are all silent. On 2026-10-22 from 95 to 97, when
+    // the stylesheet moved out of the shell: one rule says where the styles go,
+    // one says the shell links them. The reason is here rather than in a commit
+    // message, so the next person to hit the bound knows what the number guards
+    // against and does not raise it again on a whim.
     assert!(
-        rules.len() >= 30 && rules.len() <= 95,
+        rules.len() >= 30 && rules.len() <= 97,
         "the rules must stay a short list, not an essay: {} rules",
         rules.len()
     );
@@ -1475,7 +1497,7 @@ fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
     };
     let live = strip_yaml_comments(&pages);
 
-    // Every one of the eight files, by name. Naming them is the point: the
+    // Every one of the nine files, by name. Naming them is the point: the
     // failure this exists for is a `dist/` that looks publishable and is missing
     // something the page references, and a file nobody wrote does not change a
     // count.
@@ -1500,7 +1522,7 @@ fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
     let listed: Vec<&str> = expected.split_whitespace().collect();
     assert_eq!(
         listed, DIST_FILES,
-        "pages.yml's site check names these files; they must be exactly the eight the two \
+        "pages.yml's site check names these files; they must be exactly the nine the two \
          owners produce, in one list, derived from the same source",
     );
     // And it must fail on unexpected files as well as missing ones, checked by
