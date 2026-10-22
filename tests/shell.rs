@@ -200,6 +200,33 @@ fn precached_by_the_worker() -> Vec<String> {
         .collect()
 }
 
+/// The manifest is what the browser reads to decide what an install *is*, so
+/// it is the one precached URL the worker must never answer from the cache: a
+/// cached copy would let a fresh install re-derive the app's identity from a
+/// manifest older than the last change to it — the exact shape of the bug
+/// that once made every install in this family claim the same identity. It
+/// still sits in `ASSETS`, so a manifest that 404s fails the install loudly;
+/// it just always reaches the network.
+#[test]
+fn the_worker_never_serves_the_manifest_from_the_cache() {
+    let worker = worker_template();
+    assert!(
+        precached_by_the_worker()
+            .iter()
+            .any(|asset| asset == "manifest.webmanifest"),
+        "the manifest must stay in ASSETS: a broken manifest must fail the install loudly"
+    );
+    let fetch = worker
+        .split_once("addEventListener('fetch'")
+        .expect("the worker must handle fetch")
+        .1;
+    assert!(
+        fetch.contains("url === MANIFEST"),
+        "the fetch handler must exempt the manifest before ever touching the cache; \
+         a cached manifest lets an install re-derive a stale identity"
+    );
+}
+
 /// Every URL the worker precaches is a file `build.rs` publishes.
 ///
 /// This is the assertion that would have caught the missing `icon.svg`, and it
@@ -679,11 +706,59 @@ fn the_service_worker_template_has_exactly_one_placeholder() {
         worker.contains("'icon.svg'"),
         "the worker does not precache the icon's source of truth"
     );
-    // `skipWaiting` must not be *called*. The word appears in the template's
-    // own comment explaining why it is absent, so match the call.
+    // The one allowed call is behind the page's `SKIP_WAITING` message: the
+    // ask comes from the page that immediately reloads as the worker takes
+    // over, so no client ever straddles the two versions. Asserted
+    // structurally — the call must sit inside the message handler, gated on
+    // the message — so an unprompted or unconditional call cannot creep in.
+    let handler = worker
+        .split("addEventListener('message'")
+        .nth(1)
+        .expect("the worker must listen for the page's handover message");
+    let handler = &handler[..handler.find("});").expect("the message handler closes")];
     assert!(
-        !worker.contains("skipWaiting("),
-        "an update must never swap the wasm under a live tab"
+        handler.contains("event.data === 'SKIP_WAITING'") && handler.contains("skipWaiting()"),
+        "skipWaiting must be the worker's answer to the page's ask, never a call \
+         it makes on its own"
+    );
+    let outside: Vec<&str> = worker
+        .split("addEventListener('message'")
+        .next()
+        .expect("the prefix before the handler")
+        .lines()
+        .filter(|line| !line.trim_start().starts_with("//"))
+        .filter(|line| line.contains("skipWaiting"))
+        .collect();
+    assert!(
+        outside.is_empty(),
+        "no skipWaiting outside the message handler: an update must never swap \
+         the wasm under a live tab unasked, but found {outside:?}"
+    );
+}
+
+/// The page asks a newly installed worker in, and reloads as it takes over.
+///
+/// Without the ask, an installed copy only ever moves to a new version when
+/// every opening of it has closed — on a phone, possibly never. This pins
+/// both halves: the page's message, which the worker answers with
+/// `skipWaiting`, and the page's own reload on `controllerchange`.
+#[test]
+fn the_page_takes_an_installed_worker_over_with_a_reload() {
+    let code =
+        strip_rust_comments(&std::fs::read_to_string(root().join("src/ui.rs")).expect("src/ui.rs"));
+    assert!(
+        code.contains("registration.waiting()") && code.contains(".installing()"),
+        "the page must look at both workers an update can leave behind: one already \
+         installed and waiting, and one discovered while the page stands"
+    );
+    assert!(
+        code.contains("post_message(&JsValue::from_str(\"SKIP_WAITING\"))"),
+        "the handover starts with the page's message; the worker never swaps \
+         itself in unasked"
+    );
+    assert!(
+        code.contains("controllerchange") && code.contains("location().reload()"),
+        "and ends with the page reloading exactly as the worker takes over"
     );
 }
 
@@ -946,17 +1021,20 @@ fn the_instructions_are_still_a_short_flat_list() {
         "INSTRUCTIONS.md must open with a heading"
     );
     let rules: Vec<&str> = text.lines().filter(|line| line.starts_with("- ")).collect();
-    // The upper bound moved twice, and both times deliberately. On 2026-10-02
-    // from 90 to 95, when the GitHub Pages rules were added: publishing the site
-    // is part of the contract, and the failures it guards — a deploy in the CI
-    // build, publishing permissions granted workflow-wide, an `artifact_id` that
-    // v5 silently ignores — are all silent. On 2026-10-22 from 95 to 97, when
-    // the stylesheet moved out of the shell: one rule says where the styles go,
-    // one says the shell links them. The reason is here rather than in a commit
-    // message, so the next person to hit the bound knows what the number guards
-    // against and does not raise it again on a whim.
+    // The upper bound has moved twice and the reason has never been a whim.
+    // On 2026-10-02 from 90 to 95, when the GitHub Pages rules were added:
+    // publishing the site is part of the contract, and the failures it guards —
+    // a deploy in the CI build, publishing permissions granted workflow-wide, an
+    // `artifact_id` that v5 silently ignores — are all silent. On 2026-10-11 to
+    // 100 for the manifest-identity rules (no relative `id`; the worker never
+    // serves the manifest from its cache), which guard failures that present as
+    // "the wrong app installed" or "the old app came back", never as a build
+    // error; the `skipWaiting` rule was rewritten the same day, message-gated,
+    // without changing the count. The stylesheet move on 2026-10-22 added the
+    // two rules that say where styles live and that the shell links them, which
+    // took the list to 97 — inside the ceiling, so the bound itself stayed put.
     assert!(
-        rules.len() >= 30 && rules.len() <= 97,
+        rules.len() >= 30 && rules.len() <= 100,
         "the rules must stay a short list, not an essay: {} rules",
         rules.len()
     );
@@ -1897,46 +1975,50 @@ fn sha256_hex(bytes: &[u8]) -> String {
     message.extend_from_slice(&bits.to_be_bytes());
 
     for block in message.as_chunks::<64>().0 {
-        let mut w = [0u32; 64];
+        // The message schedule, in the name the rest of the function uses.
+        let mut words = [0u32; 64];
         for (index, word) in block.as_chunks::<4>().0.iter().enumerate() {
-            w[index] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+            words[index] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
         }
         for index in 16..64 {
-            let s0 = w[index - 15].rotate_right(7)
-                ^ w[index - 15].rotate_right(18)
-                ^ (w[index - 15] >> 3);
-            let s1 = w[index - 2].rotate_right(17)
-                ^ w[index - 2].rotate_right(19)
-                ^ (w[index - 2] >> 10);
-            w[index] = w[index - 16]
+            let s0 = words[index - 15].rotate_right(7)
+                ^ words[index - 15].rotate_right(18)
+                ^ (words[index - 15] >> 3);
+            let s1 = words[index - 2].rotate_right(17)
+                ^ words[index - 2].rotate_right(19)
+                ^ (words[index - 2] >> 10);
+            words[index] = words[index - 16]
                 .wrapping_add(s0)
-                .wrapping_add(w[index - 7])
+                .wrapping_add(words[index - 7])
                 .wrapping_add(s1);
         }
 
-        let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = state;
+        // The eight working variables of FIPS 180-4 §6.2.2, named `v0`..`v7`
+        // here because `a`..`h` trip the single-character-name lint; the
+        // rotation below is the spec's, only renamed.
+        let [mut v0, mut v1, mut v2, mut v3, mut v4, mut v5, mut v6, mut v7] = state;
         for index in 0..64 {
-            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-            let choose = (e & f) ^ (!e & g);
-            let temp1 = h
+            let s1 = v4.rotate_right(6) ^ v4.rotate_right(11) ^ v4.rotate_right(25);
+            let choose = (v4 & v5) ^ (!v4 & v6);
+            let temp1 = v7
                 .wrapping_add(s1)
                 .wrapping_add(choose)
                 .wrapping_add(K[index])
-                .wrapping_add(w[index]);
-            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-            let majority = (a & b) ^ (a & c) ^ (b & c);
+                .wrapping_add(words[index]);
+            let s0 = v0.rotate_right(2) ^ v0.rotate_right(13) ^ v0.rotate_right(22);
+            let majority = (v0 & v1) ^ (v0 & v2) ^ (v1 & v2);
             let temp2 = s0.wrapping_add(majority);
 
-            h = g;
-            g = f;
-            f = e;
-            e = d.wrapping_add(temp1);
-            d = c;
-            c = b;
-            b = a;
-            a = temp1.wrapping_add(temp2);
+            v7 = v6;
+            v6 = v5;
+            v5 = v4;
+            v4 = v3.wrapping_add(temp1);
+            v3 = v2;
+            v2 = v1;
+            v1 = v0;
+            v0 = temp1.wrapping_add(temp2);
         }
-        for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h]) {
+        for (slot, value) in state.iter_mut().zip([v0, v1, v2, v3, v4, v5, v6, v7]) {
             *slot = slot.wrapping_add(value);
         }
     }

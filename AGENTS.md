@@ -160,8 +160,10 @@ Until then the deploy job fails and the build half of it is still true.
   `dist/style.css` rather than an invisible one inside the document. Its
   light-scheme block is covered by a test that allows colours and nothing else.
 - `service-worker.js`: install, activate, cache-first on an allowlist of `GET`s.
-  No `skipWaiting`: an update takes over after the old tabs close, so a live app
-  never swaps the wasm out from under itself.
+  Its `skipWaiting` answers only the page's `SKIP_WAITING` message: an update
+  never swaps the wasm under a live app unasked, and the page that asks reloads
+  on `controllerchange` — so an installed copy updates on its next open instead
+  of waiting for a visit that never comes.
 - `build.rs`: writes the seven files it owns, rasterizes the install icons from the
   committed SVG, assembles the manifest, and derives the worker's cache version.
 - `assets/icon.svg`: the icon, and the source of every install icon. It is
@@ -196,11 +198,55 @@ gitignored, so the exported tree the gate tests never has it and cannot build it
 That is why no test asserts on `dist/`: such a test would run only in a
 developer's checkout, which is where it is least likely to catch anything.
 `.github/workflows/build.yml` runs both build steps in the documented order on
-every push and pull request, then inspects the `dist/` they produced — the only
-automated coverage of the built site, aimed at the two failures this shape has
-actually had. `tests/shell.rs` asserts the shape of both workflows from their
-comment-stripped text, so commenting a line out instead of deleting it satisfies
-an assertion that reads raw text.
+every push and pull request, then inspects what came out: all nine files by
+name, present and non-empty, **nothing unexpected**, the worker's `__VERSION__`
+already substituted, the bindings carrying the exports the page's dynamic import
+needs, `dist/icon.svg` identical to the committed icon, and a manifest whose icon
+list matches what was actually rasterized.
+
+Two identity rules hold across every app generated from this template, and the
+worker template carries both. The manifest declares no `id`, so an install's
+identity falls back to its own `start_url` instead of a path-relative id that
+resolves to the bare origin. And the worker, while still precaching the
+manifest — a broken one must fail the install loudly — never answers a
+manifest request from its cache: the manifest is what the browser reads to
+decide what an install *is*, a cached copy would let a fresh install re-derive
+a stale identity, and Cache Storage survives an uninstall, so the stale
+identity would outlive the app that wrote it.
+
+That check is the only automated coverage of the built site, and it is aimed at
+the two failures this shape has actually had: a `dist/` that looks publishable
+and has no app in it, and a `dist/` that has everything except one file nobody
+wrote. It fails on unexpected files as well as missing ones, because a stray
+ships exactly as quietly as an absence does.
+
+`tests/shell.rs` also asserts the *shape* of both workflows, reading them with
+comments stripped — commenting a line out instead of deleting it is the mutation
+most likely to be applied to any of them, and it satisfies an assertion that
+reads raw text. Eleven of those: the generator pin matches `Cargo.toml` and is
+declared rather than only used; no `RUSTFLAGS` where the crate needs none; master
+is the only ref that can reach the live site **and** not from a fork; the
+publishing permissions are in the `deploy` job and nowhere else; the deploy is
+handed the artifact the build uploaded, by name; the deploy is not in
+`build.yml`; every action is pinned to a 40-character commit SHA; the site check
+names all nine files and greps the things a green build cannot imply; and both
+workflows pin the icon digest this repository actually has.
+
+The fork half of the deploy gate is asserted from the comment-stripped workflow
+and on its own line, because the comment directly above that gate names both
+halves while explaining them: read raw, the prose satisfies the assertion with the
+clause deleted. Seven mutations were run against it — clause deleted, whole line
+commented out, only the fork half commented out, clause split onto a second
+`if:`, the `vars.PUBLISH_PAGES` variant, the master half dropped, and the clause
+moved to the `build` job — and every one goes red.
+
+That last one is not decoration. The icon's SHA-256 lives in three places — the
+`ICON_SHA256` constant in `tests/shell.rs` and one copy in each workflow's site
+check — and the icon changed on 2026-10-01 from the `P` glyph to three bars. That commit updated the
+constant and the icon, and **not** `build.yml`, so the build sat red from then
+until 2026-10-02, when adding `pages.yml` forced the check to be run for real
+rather than assumed green. The workflow copies now carry the reason, and the test
+asserts both equal the file on disk, so the three cannot drift apart again.
 
 ## Known limitations
 

@@ -50,7 +50,8 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Keep `src/<domain>.rs` for the logic, `src/ui.rs` for the DOM, `src/ui.html` for the shell.
 - Keep `src/service-worker.js` a committed template for install, activate and fetch only, with exactly one `__VERSION__` for `build.rs` to substitute.
 - Assemble `manifest.webmanifest` in `build.rs`, and build its icon list from the sizes actually rasterized so the two cannot drift.
-- Keep `id`, `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere.
+- Keep `start_url` and `scope` as `"./"`, and every other URL relative, so one build mounts anywhere. Declare **no** `id`: Chrome resolves a relative id against `start_url`'s *origin*, so `"./"` would give every app in the family the same install identity and Android would swallow the second install as an update of the first. Left out, identity falls back to `start_url`, which is unique per app.
+- Keep the manifest out of the worker's cache answers: it stays in the precache list (a broken manifest must fail the install loudly), but the fetch handler passes it to the network unconditionally. The manifest is what the browser reads to decide what an install *is* — serve a cached copy and a fresh install re-derives the app's identity from a manifest older than the last change to it, and Cache Storage survives an uninstall, so the stale identity outlives the app that wrote it.
 - Use `"display": "standalone"` unless the app specifically needs another mode.
 - Keep `assets/icon.svg` as the committed, authoritative icon — simple, one colour, transparent — and never replace it with a PNG.
 - Pick an icon colour that stays legible on a light surface and a dark one, and measure it rather than eyeballing it: a single static icon cannot clear 4.5:1 on both, so aim for the 3:1 bar for a graphical object and split the difference.
@@ -66,7 +67,7 @@ Prettier, no `npx`, no `node`, no bundler, no framework, no runtime install.
 - Store data in `localStorage` only when persistence is useful, under an app-specific key prefix.
 - Write nothing on first load; an app the user never touched should leave no trace.
 - Cache the shell on install, drop old caches on activate, and claim clients.
-- Never call `skipWaiting`: an update must not swap the wasm under a live tab.
+- Never call `skipWaiting` on the worker's own initiative: an update must not swap the wasm under a live tab. The one allowed call answers the page's `SKIP_WAITING` message, and the page that sends it reloads on `controllerchange` — an installed copy updates on its next open, and no page is ever swapped under without having asked.
 - Serve from an allowlist of `GET` requests, and leave everything else alone.
 - Report offline readiness in the page, not only in the console; it needs one successful visit over HTTPS or localhost.
 
