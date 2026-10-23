@@ -883,7 +883,7 @@ fn the_scope_is_a_relative_directory_shared_with_the_worker() {
 /// it. The pin is the mechanism working as intended — a red test, a visible
 /// diff, a reason — so it stays, and the reason moves here with the change
 /// rather than being left in a commit message to rot.
-const ICON_SHA256: &str = "5a7e307c7d61b27b8717fbe183be58f074af6c4ff438014ed246e0007cc24867";
+const ICON_SHA256: &str = "09f8c4fcb42a50172293f818ee4b127151e0cb049dbe04c23ca2b133275cd8d9";
 
 #[test]
 fn the_icon_is_the_committed_svg() {
@@ -917,7 +917,7 @@ fn the_icon_is_the_committed_svg() {
         .collect();
     assert_eq!(
         fills,
-        ["#7a7a7a"],
+        ["#606060"],
         "the icon is one colour, and it is the legible midpoint between a light \
          and a dark surface; found fills {fills:?}"
     );
