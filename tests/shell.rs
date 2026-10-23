@@ -2075,3 +2075,33 @@ fn strip_rust_comments(source: &str) -> String {
     out.push_str(rest);
     out
 }
+
+/// Both workflows run the same site check, on the same output.
+///
+/// `build.yml` runs it on every pull request; `pages.yml` runs it again before
+/// it publishes. The two had drifted — `pages.yml` checked the manifest's
+/// identity rules, the PNG magic bytes and the page's initializer call while
+/// `build.yml` did not, and `build.yml` checked the icon's published bytes
+/// while `pages.yml` did not — so a pull request could go green on a site the
+/// deploy would reject, which is the one failure this pair exists to prevent.
+///
+/// A rule asserted in only one of them is a deploy that goes red after the pull
+/// request went green, and nothing in the repository would say why.
+#[test]
+fn both_workflows_run_the_same_site_check() {
+    let step = |name: &str| -> Option<String> {
+        let text = workflow(name)?;
+        let start = text.find("      - name: Check the built site")?;
+        let end = text[start..].find("      - name: Run the tests")? + start;
+        Some(text[start..end].to_owned())
+    };
+    let (Some(build), Some(pages)) = (step("build.yml"), step("pages.yml")) else {
+        return; // a partial export need not carry every workflow
+    };
+    assert_eq!(
+        build, pages,
+        "the site check must be identical in build.yml and pages.yml: one runs on \
+         pull requests and the other before publishing, and a check that differs \
+         between them lets a pull request pass a site the deploy rejects"
+    );
+}
