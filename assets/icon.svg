@@ -2,18 +2,17 @@
   <!-- Three bars of increasing height: counting, and nothing else. No letter,
        no enclosing shape, one colour on a transparent ground.
 
-       The colour is a mid grey rather than the dark `#434343` this file used to
-       carry, and that is a deliberate trade. A single static icon has to be
-       legible on a light tab bar and a dark one, and no grey can clear 4.5:1
-       on both (that needs a luminance at once below 0.18 and above 0.20). The
-       bar for a graphical object is 3:1, and `#7a7a7a` reaches 4.29:1 on white
-       and 4.40:1 on this project's `#0f1117` — the best balance available,
-       rather than a colour that is legible on one scheme and invisible on the
-       other. Re-measure if the palette changes.
+       One colour, `#606060`, on a transparent ground — the whole family's icon
+       colour. A single static icon is drawn on surfaces it cannot know: the
+       app's own light and dark backgrounds, and whatever wallpaper sits behind
+       a launcher. The bar for a graphical object is 3:1, and `#606060` reaches
+       5.82:1 on the light surface and 3.00:1 on the dark one, which is what one
+       transparent-ground colour can do across both. Re-measure if the palette
+       changes.
 
        `build.rs` rasterizes the 192 and 512 install PNGs from this file, so
        this is the icon and the PNGs are derived output. -->
-  <g fill="#7a7a7a">
+  <g fill="#606060">
     <rect x="128" y="288" width="56" height="64" rx="28" />
     <rect x="228" y="224" width="56" height="128" rx="28" />
     <rect x="328" y="160" width="56" height="192" rx="28" />
