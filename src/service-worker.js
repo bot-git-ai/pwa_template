@@ -1,5 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
 // Browser lifecycle/cache plumbing only; all app logic remains Rust.
 //
 // The whole worker is install, activate, fetch. Four rules hold it together:
@@ -25,7 +23,7 @@
 
 const ROOT = new URL('./', self.location.href);
 const CACHE = 'pwa-template-' + ROOT.pathname + '-__VERSION__';
-const ASSETS = ['./', 'app.js', 'app_bg.wasm', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon.svg', 'index.html'].map(p => new URL(p, ROOT).href);
+const ASSETS = ['./', 'app.js', 'app_bg.wasm', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon.svg', 'index.html', 'style.css'].map(p => new URL(p, ROOT).href);
 const IS_OWN = url => url.startsWith(ROOT.href);
 // The manifest's URL on its own. It stays in ASSETS — a manifest that 404s
 // should still fail the install, loudly — but it is the one precached URL the

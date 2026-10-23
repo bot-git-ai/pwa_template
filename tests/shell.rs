@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! Invariants of the committed shell, and of what is and is not committed.
 //!
 //! Everything here reads committed files. `dist/` is build output and is
@@ -17,6 +14,7 @@
 //! generated file, and cannot lose the icon that every install icon is derived
 //! from. Each of those has been true of a real version of this repository.
 
+use std::fmt::Write as _;
 use std::path::Path;
 
 /// The repository root, as the tests see it.
@@ -35,6 +33,13 @@ fn shell() -> String {
 }
 
 /// The service worker template, as committed.
+/// The committed stylesheet, as the build publishes it.
+fn style() -> String {
+    let path = root().join("src/style.css");
+    std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("reading {}: {error}", path.display()))
+}
+
 fn worker_template() -> String {
     let path = root().join("src/service-worker.js");
     std::fs::read_to_string(&path)
@@ -70,7 +75,7 @@ fn tracked_files() -> Option<String> {
 /// `every_precached_file_is_published_by_the_build_script`). This list is what
 /// the workflow's site check uses, and it is written out by name on purpose: a
 /// count would not catch a file that is referenced but never written.
-const DIST_FILES: [&str; 8] = [
+const DIST_FILES: [&str; 9] = [
     "app.js",
     "app_bg.wasm",
     "icon.svg",
@@ -79,6 +84,7 @@ const DIST_FILES: [&str; 8] = [
     "index.html",
     "manifest.webmanifest",
     "service-worker.js",
+    "style.css",
 ];
 
 /// The files `build.rs` publishes, read out of the script itself.
@@ -280,7 +286,7 @@ fn everything_the_build_publishes_is_precached_or_understood() {
 
 /// `dist/` is the union of the two owners, and the worker allowlists exactly
 /// that. This is the test that reports a site in terms a reader can act on:
-/// eight files, eight precached, nothing referenced and unwritten.
+/// nine files, nine precached, nothing referenced and unwritten.
 #[test]
 fn the_whole_site_is_the_union_of_its_two_owners() {
     let mut site = published_by_build_script();
@@ -427,17 +433,29 @@ fn the_page_is_accessible_and_installable() {
     ] {
         assert!(page.contains(required), "the shell is missing {required}");
     }
+    // The stylesheet is its own file: linked from the shell, precached by the
+    // worker and versioned with the rest of the site, rather than inlined where
+    // nothing can cache or diff it on its own.
     assert!(
-        page.contains("outline: 3px solid"),
+        page.contains("rel=\"stylesheet\" href=\"./style.css\""),
+        "the shell must link its stylesheet, relative to itself"
+    );
+    assert!(
+        !page.contains("<style"),
+        "the shell must not inline its styles: they live in src/style.css"
+    );
+    let css = style();
+    assert!(
+        css.contains("outline: 3px solid"),
         "focus must stay visible"
     );
     assert!(
-        page.contains("min-height: 44px"),
+        css.contains("min-height: 44px"),
         "touch targets must be large enough for mobile use"
     );
     assert!(
-        page.contains("prefers-color-scheme") && page.contains("prefers-reduced-motion"),
-        "the shell must respect both media queries"
+        css.contains("prefers-color-scheme") && css.contains("prefers-reduced-motion"),
+        "the stylesheet must respect both media queries"
     );
 }
 
@@ -1003,21 +1021,18 @@ fn the_instructions_are_still_a_short_flat_list() {
         "INSTRUCTIONS.md must open with a heading"
     );
     let rules: Vec<&str> = text.lines().filter(|line| line.starts_with("- ")).collect();
-    // The upper bound moved once, on 2026-10-02, from 90 to 95, when the GitHub
-    // Pages rules were added: publishing the site is part of the contract, and
-    // the failures it guards — a deploy in the CI build, publishing permissions
-    // granted workflow-wide, an `artifact_id` that v5 silently ignores — are
-    // all silent. It is a deliberate change and the reason is here rather than
-    // in a commit message, so the next person to hit the bound knows what the
-    // number is guarding against and does not raise it again on a whim.
-    //
-    // It moved a second time, on 2026-10-11, from 95 to 100, for the same
-    // shape of reason: the manifest-identity rules (no relative `id`; the
-    // worker never serves the manifest from its cache) guard failures that
-    // present as "the wrong app installed" or "the old app came back", never
-    // as a build error. One rule was added for the second of those. The
-    // `skipWaiting` rule was rewritten the same day — message-gated, with the
-    // page reload — without changing the count.
+    // The upper bound has moved twice and the reason has never been a whim.
+    // On 2026-10-02 from 90 to 95, when the GitHub Pages rules were added:
+    // publishing the site is part of the contract, and the failures it guards —
+    // a deploy in the CI build, publishing permissions granted workflow-wide, an
+    // `artifact_id` that v5 silently ignores — are all silent. On 2026-10-11 to
+    // 100 for the manifest-identity rules (no relative `id`; the worker never
+    // serves the manifest from its cache), which guard failures that present as
+    // "the wrong app installed" or "the old app came back", never as a build
+    // error; the `skipWaiting` rule was rewritten the same day, message-gated,
+    // without changing the count. The stylesheet move on 2026-10-22 added the
+    // two rules that say where styles live and that the shell links them, which
+    // took the list to 97 — inside the ceiling, so the bound itself stayed put.
     assert!(
         rules.len() >= 30 && rules.len() <= 100,
         "the rules must stay a short list, not an essay: {} rules",
@@ -1535,10 +1550,9 @@ fn both_workflows_pin_the_icon_the_repository_still_has() {
         let live = strip_yaml_comments(&text);
         assert!(
             live.contains(&digest),
-            "{workflow_name} pins a digest for assets/icon.svg that is not the icon this \
-             repository has (the file hashes to {digest}); the workflow has been red since \
-             the icon changed, and shipping it would pin the wrong icon as 'the author's \
-             original'",
+            "{workflow_name} pins a digest for assets/icon.svg that is not the icon this repository has \
+             (the file hashes to {digest}); the workflow has been red since the icon changed, \
+             and shipping it would pin the wrong icon as 'the author's original'",
         );
     }
 }
@@ -1561,7 +1575,7 @@ fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
     };
     let live = strip_yaml_comments(&pages);
 
-    // Every one of the eight files, by name. Naming them is the point: the
+    // Every one of the nine files, by name. Naming them is the point: the
     // failure this exists for is a `dist/` that looks publishable and is missing
     // something the page references, and a file nobody wrote does not change a
     // count.
@@ -1586,7 +1600,7 @@ fn the_workflow_checks_the_built_site_rather_than_the_exit_status() {
     let listed: Vec<&str> = expected.split_whitespace().collect();
     assert_eq!(
         listed, DIST_FILES,
-        "pages.yml's site check names these files; they must be exactly the eight the two \
+        "pages.yml's site check names these files; they must be exactly the nine the two \
          owners produce, in one list, derived from the same source",
     );
     // And it must fail on unexpected files as well as missing ones, checked by
@@ -1868,9 +1882,10 @@ permissions:
 /// — so this is the FIPS 180-4 round constants and 64 rounds, and it is
 /// checked against the published test vectors in the test below. If you ever
 /// change this function, that test has to keep passing.
-///
-/// The length is the algorithm's, not a style choice: FIPS 180-4 is what it is.
-#[allow(clippy::too_many_lines)]
+// Verbatim FIPS 180-4: the round constants, the 64 rounds and the standard
+// a..h state names are the specification; splitting or renaming them would
+// only make the code harder to check against it.
+#[allow(clippy::many_single_char_names, clippy::too_many_lines)]
 fn sha256_hex(bytes: &[u8]) -> String {
     const K: [u32; 64] = [
         0x428a_2f98,
@@ -1960,14 +1975,9 @@ fn sha256_hex(bytes: &[u8]) -> String {
     message.extend_from_slice(&bits.to_be_bytes());
 
     for block in message.as_chunks::<64>().0 {
+        // The message schedule, in the name the rest of the function uses.
         let mut words = [0u32; 64];
-        for (index, (word, ())) in block
-            .as_chunks::<4>()
-            .0
-            .iter()
-            .map(|chunk| (chunk, ()))
-            .enumerate()
-        {
+        for (index, word) in block.as_chunks::<4>().0.iter().enumerate() {
             words[index] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
         }
         for index in 16..64 {
@@ -2013,11 +2023,11 @@ fn sha256_hex(bytes: &[u8]) -> String {
         }
     }
 
-    state
-        .iter()
-        .map(|word| format!("{word:08x}"))
-        .collect::<Vec<String>>()
-        .concat()
+    let mut hex = String::with_capacity(state.len() * 8);
+    for word in state {
+        write!(hex, "{word:08x}").expect("writing to String cannot fail");
+    }
+    hex
 }
 
 /// The digest function above is load-bearing for the icon test, so it is

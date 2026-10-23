@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! Write the site to `dist/` while the crate compiles.
 //!
 //! The app is a static site, so publishing it is a file copy plus three small
@@ -71,7 +68,11 @@ use std::path::{Path, PathBuf};
 /// bar can follow the system.
 const MANIFEST: Manifest = Manifest {
     name: "Simple PWA",
-    short_name: "PWA",
+    // The launcher label is the app's name: one name in both fields. A short
+    // name is only worth having when it still names the thing, and "PWA" says
+    // nothing about what the app does — it would be the label under every icon
+    // this template makes.
+    short_name: "Simple PWA",
     background_color: "#0f1117",
 };
 
@@ -80,7 +81,10 @@ const MANIFEST: Manifest = Manifest {
 /// The two wasm artefacts are deliberately absent: they are written by
 /// `wasm-bindgen` into `dist/`, they are never committed, and they have no
 /// committed source to copy from.
-const SHELL: &[(&str, &str)] = &[("index.html", "src/ui.html")];
+const SHELL: &[(&str, &str)] = &[
+    ("index.html", "src/ui.html"),
+    ("style.css", "src/style.css"),
+];
 
 /// The committed SVG every icon is derived from.
 const ICON: &str = "assets/icon.svg";
@@ -182,9 +186,10 @@ fn rasterize(svg: &[u8], size: u32) -> Vec<u8> {
     let Some(mut pixmap) = tiny_skia::Pixmap::new(size, size) else {
         panic!("a {size}x{size} pixmap could not be allocated");
     };
-    // `size` is a `u32` and the transform is `f32`, so this divides in `f32`;
-    // dividing in `f64` and casting afterwards is the mistake to avoid. The
-    // sizes are tiny (192, 512), so the cast is exact.
+    // `size` is a `u32` and the transform is `f32`; every icon size is far
+    // below f32's 24-bit exact-integer range, so the conversion is exact.
+    // The division stays in `f32`: dividing in `f64` and casting afterwards
+    // is the mistake to avoid.
     #[allow(clippy::cast_precision_loss)]
     let scale = size as f32 / tree.size().width();
     resvg::render(

@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! The app's actual logic: one counter and its rules.
 //!
 //! No `web-sys`, no `js-sys`, no `wasm-bindgen`, so this module compiles and

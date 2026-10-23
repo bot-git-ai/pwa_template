@@ -10,7 +10,7 @@ any file host can serve, with no server and no binary. All application logic,
 state and rendering is Rust. The only JavaScript is the generated wasm-bindgen
 bindings, a six-line dynamic-import loader, and the service worker.
 
-AGPL-3.0-only. See `LICENSE`.
+AGPL-3.0-only: see `LICENSE`.
 
 This is a standalone private repository, holding the original history of the
 public `github.com/wdomitrz/pwa_template` (upstream, read-only).
@@ -40,23 +40,17 @@ touch build.rs
 cargo build --release --locked
 ```
 
-Step 1 writes `dist/app.js` and `dist/app_bg.wasm`; step 2 adds the six files
+Step 1 writes `dist/app.js` and `dist/app_bg.wasm`; step 2 adds the seven files
 `build.rs` owns and derives the service worker's cache version.
 
-**The order matters**, and the `touch` is not redundant. The cache version is
-hashed from the bytes of every other file in `dist/`, the wasm included, so
-running step 2 first pins it to whatever the previous build left behind — a
-worker whose cache never invalidates, shipping an app older than its own cache
-name. And `build.rs` writes into the source tree rather than `OUT_DIR`, so cargo
-cannot see that its output changed and would skip the second, otherwise
-identical build, leaving `dist/` with the two wasm artefacts and none of the six
-shell files. That is a half-built site, and it is the failure this shape has
-already had.
-
-`build.rs` writes only the files it owns, each under a scratch name and renamed
-into place. It does not replace `dist/`, so it leaves the wasm alone: an earlier
-version that swapped the whole tree deleted them and left a publishable-looking
-site with no app in it.
+The order matters: the cache version is hashed from every other file in
+`dist/`, the wasm included, so step 2 pins it to whatever the previous build
+left behind if it runs first; and the `touch` is not redundant, because
+`build.rs` writes into the source tree rather than `OUT_DIR`, so cargo skips the
+second, otherwise identical build without it. `build.rs` writes in place, under
+a scratch name, and never replaces `dist/` — an earlier version that swapped the
+whole tree deleted the wasm and shipped a publishable-looking site with no app
+in it.
 
 There is **no run step and no server**: the build is the whole story.
 
@@ -69,49 +63,34 @@ app could not start", which looks like an app bug and is not one.
 
 ## No compiler flag is needed, and adding one would be wrong
 
-There is no `.cargo/config.toml`, no `RUSTFLAGS`, and there should be neither.
-`--cfg=web_sys_unstable_apis` is for web-sys's unstable surface — the Screen
-Wake Lock API, whose `WakeLockSentinel` type is behind that cfg in web-sys
-0.3.105 and is unreachable without it even with the cargo features enabled.
-**This template uses no unstable API.** Verified 2026-10-02: a wasm build with
-a fresh `CARGO_TARGET_DIR`, no `RUSTFLAGS` and no `.cargo/config.toml` finishes
-clean, in 7m41s.
+There is no `.cargo/config.toml`, no `RUSTFLAGS`, and there should be neither:
+**this template uses no unstable API** — `--cfg=web_sys_unstable_apis` is for
+web-sys's unstable surface (web-sys 0.3.105) — and a workflow carrying the cfg
+the crate is not built with makes the wasm clippy run lint a different program
+from the one that ships. Why, and what an app that *does* add an unstable API
+must move together, is told in full in `pages.yml`'s `env:` comment. Verified
+2026-10-02: a wasm build with a fresh `CARGO_TARGET_DIR`, no `RUSTFLAGS` and no
+`.cargo/config.toml` finishes clean, in 7m41s.
 
-So a copy-and-rename should not acquire the flag, and a reviewer should distrust
-a workflow that carries it. The reason is not tidiness. Several web-sys getters
-are typed *differently* behind that cfg — `MouseEvent::client_x` is `i32` on
-the stable path and `f64` behind it, and `PointerEvent` inherits the type — so
-a workflow setting a cfg the crate is not built with makes the wasm clippy run
-lint a **different program from the one that ships**. The host clippy run cannot
-see it, because the host build compiles no web-sys code at all. `chwazi` sets no
-`RUSTFLAGS` and says why at length in its own `build.yml`.
-
-If a generated app *does* add an unstable API, three things have to move
-together, and the cfg is the smallest of them:
-
-- the `web-sys` cargo features for what it calls (necessary, and **not**
-  sufficient on their own);
-- `RUSTFLAGS: --cfg=web_sys_unstable_apis` in the workflows' top-level `env:`,
-  not on one step, so the wasm clippy run sees it too;
-- the app's AGENTS.md, saying which API and why.
-
-`.cargo/config.toml` is the better long-term home for the flag — it travels with
-the repository, so a fresh CI runner and a plain `cargo build` both get it
-without anything to remember — but `build.rs` does **not** work, and it is worth
-saying why, because the failure is silent. `cargo:rustc-cfg` applies only to the
-*building* package's own units, and web-sys is a registry dependency compiled in
-its own unit, so the cfg never reaches it. A `compile_error!` probe inside the
-crate confirms the cfg *is* set on the local crate, which is exactly why the
-technique looks like it works.
+Two traps worth keeping here because their failure is silent: `.cargo/config.toml`
+is the better long-term home for the flag (it travels with the repository), but
+`build.rs` does not work for it — `cargo:rustc-cfg` applies only to the
+*building* package's own units, so the cfg never reaches web-sys, while a
+`compile_error!` probe inside the crate confirms the cfg *is* set on the local
+crate, which is exactly why the technique looks like it works. And several
+web-sys getters are typed differently behind the cfg (`MouseEvent::client_x` is
+`i32` on the stable path, `f64` behind it), so a leg without the flag is a false
+green.
 
 ## The static site
 
-Eight files, from two builds, and two owners:
+Nine files, from two builds, and two owners:
 
 - `app.js` and `app_bg.wasm` are written by `wasm-bindgen`. They are the app
   itself and exist nowhere else in the tree.
-- The other six are written by `build.rs` during step 2, from committed sources:
-  `index.html` (from `src/ui.html`, byte for byte), `service-worker.js` (with
+- The other seven are written by `build.rs` during step 2, from committed sources:
+  `index.html` and `style.css` (from `src/ui.html` and `src/style.css`, byte for
+  byte), `service-worker.js` (with
   its cache name pinned to a version derived from the bytes of every other file
   in the directory **and its own source**), `icon.svg`, `icon-192.png`,
   `icon-512.png`, and `manifest.webmanifest`.
@@ -142,38 +121,13 @@ the live site on every ref. Both publishing permissions are scoped to the
 `deploy` job alone, never granted workflow-wide, so a build step or a
 third-party action added later cannot spend them.
 
-The Pages workflow rebuilds the site rather than passing `build.yml`'s artifact
-across: `upload-pages-artifact` is not `upload-artifact`, the Pages artifact is a
-single tarball the deploy then finds *by name*, and `deploy-pages` v5 has no
-`artifact_id` input — it warns `Unexpected input(s) 'artifact_id'`, ignores it,
-and falls back to its own default. Both sides therefore state `artifact_name`
-explicitly and `tests/shell.rs` asserts they are the same string, so a mismatch
-is a diff rather than a bare `HttpError: Not Found` at run time.
-
-**The deploy gate has two halves, and the second one is the one people forget.**
-It is `github.ref == 'refs/heads/master' && !github.event.repository.fork`. The
-fork clause is not optional tidiness: this repository *is* a fork
-(`bot-git-ai/pwa_template` of `wdomitrz/pwa_template`), and a fork exists
-precisely so its files can be copied — so this workflow is byte-identical in
-both, both have a `master`, and a gate that keys only on the branch name cannot
-tell them apart. A push to the fork's master then builds green, runs the full
-site check, and dies at the deploy with "Ensure GitHub Pages has been enabled",
-because a fork has no Pages site until someone enables one by hand.
-
-`github.event.repository.fork` is the discriminator because the event supplies
-it — false upstream, true in the fork — and it needs no configuration anywhere. A
-repository Actions variable (`vars.PUBLISH_PAGES`) reads as more explicit and is
-strictly worse: it would have to be set on the *user's* repository to publish,
-and this account holds only `pull` there, so the one setting that turns on the
-live site would be one nobody but the user could make. A gate that must be
-configured before it works ships as silently off, and a silently-off deploy gate
-on the repository that owns the site is worse than a red fork run.
-
-**A copy of this template is usually made into a fork as well**, so the clause
-has to survive the copy. `tests/shell.rs` asserts both halves of the gate, in
-one `if:`, read from the comment-stripped workflow — the comment above the gate
-names both halves while explaining them, so an assertion over raw text is
-satisfied by the prose with the clause deleted.
+The gate has two halves, `github.ref == 'refs/heads/master' &&
+!github.event.repository.fork`, in one `if:` — the fork clause is what keeps a
+push to a fork's master (this repository *is* one) from trying to publish — and
+`tests/shell.rs` asserts both halves from the comment-stripped workflow. Why the
+artifact is rebuilt rather than passed across, why the gate keys on
+`github.event.repository.fork` rather than a repository variable, and why the
+artifact travels by name, are told in full in `pages.yml`'s comments.
 
 **Pages must be enabled in the repository's settings** (Settings → Pages →
 Source → GitHub Actions) before any of this deploys. That is a one-time action
@@ -194,60 +148,39 @@ Until then the deploy job fails and the build half of it is still true.
   worker. It makes no decisions — everything it displays was decided and tested
   in `counter.rs`. It reports nothing to the page: the worker registers, and
   whether that worked is a console warning, not a line of the reader's screen.
-- `ui.html`: the static shell. One inline `<style>`, one `<script type="module">`
-  whose whole body is a dynamic import with a failure message. The README of the
-  design is that a copy of this app renames four ids and deletes nothing.
+- `ui.html`: the static shell. Structure and meta tags only, a link to the
+  stylesheet, and one `<script type="module">` whose whole body is a dynamic
+  import with a failure message. The README of the design is that a copy of this
+  app renames four ids and deletes nothing.
+- `style.css`: the one stylesheet, published byte for byte. It is a file rather
+  than a `<style>` block for three reasons that all show up in a real deploy: the
+  worker can precache and version it as its own entry, a browser caches it across
+  navigations instead of re-downloading it inside every HTML response, and a
+  stale-while-revalidate bug is visible in the network panel as a missed
+  `dist/style.css` rather than an invisible one inside the document. Its
+  light-scheme block is covered by a test that allows colours and nothing else.
 - `service-worker.js`: install, activate, cache-first on an allowlist of `GET`s.
   Its `skipWaiting` answers only the page's `SKIP_WAITING` message: an update
-  never swaps the wasm under a live app unasked, and the page that asks
-  (`ui.rs`'s `nudge_worker_update`) reloads on `controllerchange` — so an
-  installed copy updates on its next open instead of waiting for a visit that
-  never comes.
-- `build.rs`: writes the six files it owns, rasterizes the install icons from the
+  never swaps the wasm under a live app unasked, and the page that asks reloads
+  on `controllerchange` — so an installed copy updates on its next open instead
+  of waiting for a visit that never comes.
+- `build.rs`: writes the seven files it owns, rasterizes the install icons from the
   committed SVG, assembles the manifest, and derives the worker's cache version.
 - `assets/icon.svg`: the icon, and the source of every install icon. It is
   published to `dist/` unchanged and rasterized to the two PNGs at build time; it
   is never replaced by a PNG and never regenerated. Its SHA-256 is pinned in
-  `tests/shell.rs`, so changing it is a deliberate act. It was the original
-  template's `P` glyph until 2026-10-01, when three bars in a mid grey replaced
-  it: a letter read as decoration, and the old `#434343` was 1.9:1 on this
-  project's own dark background.
+  `tests/shell.rs` (with the story of its one change, on 2026-10-01, from the
+  original template's `P` glyph to three bars in a mid grey — the old `#434343`
+  was 1.9:1 on this project's own dark background), so changing it is a
+  deliberate act.
 
 ## Tests
 
-`cargo test --locked` needs neither the wasm target nor the bindings generator.
-Two kinds:
-
-- Unit tests in `counter.rs`, over the real logic: saturation at both ends,
-  clamping on the way in, corrupt or absent storage, and what is worth writing.
-- `tests/shell.rs`, over the committed shell: the page loads generated bindings
-  and has exactly one script tag; the loader does nothing but load and report
-  failure; no absolute URLs; the worker template has exactly one `__VERSION__`;
-  the icon is the committed SVG and the PNGs are nowhere but `dist/`; no
-  generated artefact is tracked and `dist/` is ignored; the JS template's files
-  are gone; and `INSTRUCTIONS.md` is still a short flat list.
-
-Three of those are worth calling out, because they were written to catch real
-bugs rather than to decorate the file:
-
-- **`every_precached_file_is_published_by_the_build_script`** parses the worker's
-  `ASSETS` array and `build.rs`'s own declarations, and asserts the two agree in
-  both directions. This repository shipped a site whose page and worker both
-  referenced `icon.svg` while `build.rs` never published it. The consequence was
-  not a missing favicon: `caches.addAll` rejects the *entire* install if any
-  listed URL 404s, so the app lost its service worker and all offline support,
-  and presented as a caching bug with nothing in the build output pointing at
-  the missing file.
-- The expectations are **derived**, not duplicated. A hand-kept list of eight file
-  names in the test is a second copy of the truth and would have agreed with
-  itself while the site was broken — which is how the bug survived in the first
-  place.
-- **`the_whole_site_is_the_union_of_its_two_owners`** states the whole invariant
-  in one assertion: the two build steps write exactly these eight files, and the
-  worker allowlists exactly those.
-
-There are no browser tests. The shell is written by the build, and nothing else
-would notice it breaking.
+`cargo test --locked` needs neither the wasm target nor the bindings generator:
+unit tests in `counter.rs` over the real logic, and `tests/shell.rs` — the
+executable specification of the build's shape; read it. There are no browser
+tests: the shell is written by the build, and nothing else would notice it
+breaking.
 
 ## Verification
 
@@ -265,7 +198,7 @@ gitignored, so the exported tree the gate tests never has it and cannot build it
 That is why no test asserts on `dist/`: such a test would run only in a
 developer's checkout, which is where it is least likely to catch anything.
 `.github/workflows/build.yml` runs both build steps in the documented order on
-every push and pull request, then inspects what came out: all eight files by
+every push and pull request, then inspects what came out: all nine files by
 name, present and non-empty, **nothing unexpected**, the worker's `__VERSION__`
 already substituted, the bindings carrying the exports the page's dynamic import
 needs, `dist/icon.svg` identical to the committed icon, and a manifest whose icon
@@ -296,7 +229,7 @@ is the only ref that can reach the live site **and** not from a fork; the
 publishing permissions are in the `deploy` job and nowhere else; the deploy is
 handed the artifact the build uploaded, by name; the deploy is not in
 `build.yml`; every action is pinned to a 40-character commit SHA; the site check
-names all eight files and greps the things a green build cannot imply; and both
+names all nine files and greps the things a green build cannot imply; and both
 workflows pin the icon digest this repository actually has.
 
 The fork half of the deploy gate is asserted from the comment-stripped workflow
@@ -309,12 +242,11 @@ moved to the `build` job — and every one goes red.
 
 That last one is not decoration. The icon's SHA-256 lives in three places — the
 `ICON_SHA256` constant in `tests/shell.rs` and one copy in each workflow's site
-check — and the icon changed on 2026-10-01 from the `P` glyph to three bars.
-That commit updated the constant and the icon, and **not** `build.yml`, so the
-build sat red from then until 2026-10-02, when adding `pages.yml` forced the
-check to be run for real rather than assumed green. The workflow copies now
-carry the reason, and the test asserts both equal the file on disk, so the three
-cannot drift apart again.
+check — and the icon changed on 2026-10-01 from the `P` glyph to three bars. That commit updated the
+constant and the icon, and **not** `build.yml`, so the build sat red from then
+until 2026-10-02, when adding `pages.yml` forced the check to be run for real
+rather than assumed green. The workflow copies now carry the reason, and the test
+asserts both equal the file on disk, so the three cannot drift apart again.
 
 ## Known limitations
 

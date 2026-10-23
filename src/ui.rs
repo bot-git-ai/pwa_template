@@ -1,6 +1,3 @@
-// Copyright (c) 2026 Witalis Domitrz <witekdomitrz@gmail.com>
-// AGPL License
-
 //! The browser layer: the only file that talks to the DOM.
 //!
 //! Every decision — what the count becomes, when it stops, what the readout
