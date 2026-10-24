@@ -902,11 +902,13 @@ fn the_icon_is_the_committed_svg() {
     // in exactly the sentence explaining why it went: a test that would survive
     // the very thing it exists to catch.
     //
-    // The mid grey is measured, not chosen by eye. A single static icon has to
-    // stay legible on a light surface and a dark one, and no grey can clear
-    // 4.5:1 on both — that needs a relative luminance below 0.18 and above 0.20
-    // at the same time. 3:1 is the bar for a graphical object, and `#7a7a7a`
-    // reaches 4.29:1 on white and 4.40:1 on this project's `#0f1117`.
+    // The colour is the family's, not this file's own discovery, and it is
+    // pinned here so a copied app inherits it rather than re-deriving a grey
+    // of its own — which is how the family ended up two greys apart. The
+    // measurement behind it was done once: #444444 reaches 8.28:1 on a white
+    // launcher and 1.95:1 on a near-black one — below the 3:1 bar for a
+    // graphical object on dark, accepted family-wide for one colour
+    // everywhere. INSTRUCTIONS.md carries the rule; this is the enforcement.
     let icon_text = String::from_utf8_lossy(&bytes);
     let fills: Vec<&str> = icon_text
         .match_indices("fill=\"")
@@ -918,8 +920,9 @@ fn the_icon_is_the_committed_svg() {
     assert_eq!(
         fills,
         ["#444444"],
-        "the icon is one colour, and it is the legible midpoint between a light \
-         and a dark surface; found fills {fills:?}"
+        "the icon is one colour, and it is the family's pinned `#444444` — \
+         INSTRUCTIONS.md's rule, enforced here so no app re-derives a grey of \
+         its own; found fills {fills:?}"
     );
     // The PNGs are build output: never committed, and never in the source tree
     // at all. They exist in `dist/`, which is the site and nothing else. The

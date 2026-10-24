@@ -169,10 +169,10 @@ Until then the deploy job fails and the build half of it is still true.
 - `assets/icon.svg`: the icon, and the source of every install icon. It is
   published to `dist/` unchanged and rasterized to the two PNGs at build time; it
   is never replaced by a PNG and never regenerated. Its SHA-256 is pinned in
-  `tests/shell.rs` (with the story of its one change, on 2026-10-01, from the
-  original template's `P` glyph to three bars in a mid grey — the old `#434343`
-  was 1.9:1 on this project's own dark background), so changing it is a
-  deliberate act.
+  `tests/shell.rs` (changed twice: on 2026-10-01 the original template's `P`
+  glyph gave way to three bars in a mid grey — the old `#434343` was 1.9:1 on
+  this project's own dark background — and on 2026-10-23 the grey became the
+  family's `#444444`), so changing it is a deliberate act.
 
 ## Tests
 
