@@ -15,7 +15,9 @@ Two steps, because there are two targets. Nothing generated is committed.
 
 ```bash
 rustup target add wasm32-unknown-unknown
-cargo install wasm-bindgen-cli --version 0.2.128 --locked
+# the generator must be the version Cargo.lock records
+cargo install wasm-bindgen-cli --locked \
+  --version "$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)"
 
 # 1. the site: compile to wasm and generate the JS bindings
 cargo build --locked --lib --target wasm32-unknown-unknown --release
@@ -60,9 +62,9 @@ rewritten for this stack. Read it before you write anything.
 
 - `wasm-bindgen` is **not** on `PATH` in a non-login shell. Call it by absolute
   path, or add `~/.cargo/bin`.
-- The generator version is pinned to `=0.2.128` and must match `Cargo.toml`
-  exactly. A mismatch produces bindings the page will not load, and it fails with
-  "The app could not start".
+- The generator must be the `wasm-bindgen` version `Cargo.lock` records — the
+  `cargo install` line above reads it from there. A mismatch produces bindings
+  the page will not load, and it fails with "The app could not start".
 - After changing anything in `src/`, run both build steps again. The wasm is not
   committed, so nothing reminds you.
 - `build.rs` writes into `dist/`, which is gitignored — so no test can assert on

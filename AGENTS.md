@@ -56,16 +56,19 @@ There is **no run step and no server**: the build is the whole story.
 
 `wasm-bindgen` installs to `~/.cargo/bin`, which is on `PATH` in a normal login
 shell; in a bare or non-login shell call it by absolute path
-(`~/.cargo/bin/wasm-bindgen`). The version is pinned to `=0.2.128` in
-`Cargo.toml` and must match the CLI exactly — a mismatched generator produces
-bindings the runtime will not load, and the page then fails to start with "The
-app could not start", which looks like an app bug and is not one.
+(`~/.cargo/bin/wasm-bindgen`). `Cargo.toml` asks for `wasm-bindgen = "0.2"` and
+`Cargo.lock` records the one version that means, because `wasm-bindgen-futures`,
+`js-sys` and `web-sys` each depend on an exact `wasm-bindgen`. The CLI must be
+that version — a mismatched generator produces bindings the runtime will not
+load, and the page then fails to start with "The app could not start", which
+looks like an app bug and is not one. Both workflows read the version from
+`Cargo.lock` instead of naming it, so there is nothing to keep in step.
 
 ## No compiler flag is needed, and adding one would be wrong
 
 There is no `.cargo/config.toml`, no `RUSTFLAGS`, and there should be neither:
 **this template uses no unstable API** — `--cfg=web_sys_unstable_apis` is for
-web-sys's unstable surface (web-sys 0.3.105) — and a workflow carrying the cfg
+web-sys's unstable surface (web-sys 0.3) — and a workflow carrying the cfg
 the crate is not built with makes the wasm clippy run lint a different program
 from the one that ships. Why, and what an app that *does* add an unstable API
 must move together, is told in full in `pages.yml`'s `env:` comment. Verified
@@ -250,9 +253,10 @@ asserts both equal the file on disk, so the three cannot drift apart again.
 
 ## Known limitations
 
-- `wasm-bindgen` must be installed separately and must match `=0.2.128` exactly.
-  CI installs the pinned prebuilt binary and verifies it against both the
-  release's own checksum and a digest recorded in the workflow.
+- `wasm-bindgen` must be installed separately, at the version `Cargo.lock`
+  records. CI reads that version from the lock, downloads the matching prebuilt
+  binary and verifies it against both the release's own checksum and a digest
+  recorded in the workflow.
 - GitHub Pages is off until someone enables it in the repository's settings, so
   the Pages deploy's `deploy` job fails until they do. The build half of that
   workflow is still true and still checked.
